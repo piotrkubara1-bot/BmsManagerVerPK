@@ -1,0 +1,37 @@
+# Build outputs
+bin/
+target/
+out/
+build/
+
+# Temporary compile source lists
+.java_sources.tmp
+.java_sources.txt
+
+# Local runtime caches and logs
+*.log
+*.pid
+
+# Environment files
+.env
+*.env.local
+
+# Local tool/download caches
+.tools/
+
+# Python artifacts (RPI sender)
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+RPI/.venv/
+
+# IDE/editor settings
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

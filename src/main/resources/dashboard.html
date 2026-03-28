@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>BMS Dashboard</title>
+	<link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+<div class="app-shell">
+	<header class="topbar">
+		<h1>BMS Operations Console</h1>
+		<div class="connection" id="healthStatus">Connecting...</div>
+	</header>
+
+	<nav class="tabbar">
+		<button class="tab active" data-tab="live">Live Data</button>
+		<button class="tab" data-tab="events">Events</button>
+		<button class="tab" data-tab="statistics">Statistics</button>
+		<button class="tab" data-tab="cell-settings">Cell Settings</button>
+	</nav>
+
+	<main class="content">
+		<section id="tab-live" class="tab-content active">
+			<div class="module-grid" id="moduleGrid"></div>
+		</section>
+
+		<section id="tab-events" class="tab-content">
+			<table>
+				<thead>
+				<tr>
+					<th>Timestamp</th>
+					<th>Module</th>
+					<th>Severity</th>
+					<th>Code</th>
+					<th>Message</th>
+				</tr>
+				</thead>
+				<tbody id="eventsTableBody"></tbody>
+			</table>
+		</section>
+
+		<section id="tab-statistics" class="tab-content">
+			<div class="stats-cards" id="statsCards"></div>
+		</section>
+
+		<section id="tab-cell-settings" class="tab-content">
+			<div class="settings-note">
+				These are host-side settings values. Protocol-level TinyBMS writes will be mapped in the next phase.
+			</div>
+			<form id="settingsForm" class="settings-form">
+				<label>
+					Module
+					<select id="settingsModule">
+						<option value="1">1</option>
+						<option value="2">2</option>
+						<option value="3">3</option>
+						<option value="4">4</option>
+					</select>
+				</label>
+				<label>
+					Parameter
+					<select id="settingsKey"></select>
+				</label>
+				<label>
+					Value
+					<input id="settingsValue" type="number" step="0.001" required>
+				</label>
+				<button type="submit">Apply</button>
+				<span id="settingsStatus"></span>
+			</form>
+			<table>
+				<thead>
+				<tr>
+					<th>Parameter</th>
+					<th>Unit</th>
+					<th>Module 1</th>
+					<th>Module 2</th>
+					<th>Module 3</th>
+					<th>Module 4</th>
+				</tr>
+				</thead>
+				<tbody id="settingsTableBody"></tbody>
+			</table>
+		</section>
+	</main>
+</div>
+
+<script src="dashboard.js"></script>
+</body>
+</html>

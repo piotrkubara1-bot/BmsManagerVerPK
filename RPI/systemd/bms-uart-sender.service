@@ -1,0 +1,15 @@
+[Unit]
+Description=BMS UART Sender (RPi -> Host API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/bms-rpi
+ExecStart=/opt/bms-rpi/run_sender.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

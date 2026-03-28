@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.control.ComboBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+<?import javafx.scene.text.Font?>
+<?import javafx.scene.text.Text?>
+
+<VBox alignment="CENTER" spacing="20.0" prefHeight="420.0" prefWidth="760.0"
+	  style="-fx-background-color: #1f2a37; -fx-padding: 20;"
+	  xmlns="http://javafx.com/javafx/8"
+	  xmlns:fx="http://javafx.com/fxml/1"
+	  fx:controller="FXMLController">
+
+	<children>
+		<Text fill="WHITE" text="BMS REAL-TIME DASHBOARD">
+			<font>
+				<Font name="System Bold" size="24.0"/>
+			</font>
+		</Text>
+
+		<HBox alignment="CENTER" spacing="8.0">
+			<children>
+				<Label text="Display Module" textFill="#d7e2ef"/>
+				<ComboBox fx:id="cmbModule" prefWidth="120.0"/>
+			</children>
+		</HBox>
+
+		<HBox alignment="CENTER" spacing="24.0">
+			<children>
+				<VBox alignment="CENTER" spacing="6.0"
+					  style="-fx-background-color: #2c3b4d; -fx-padding: 18; -fx-background-radius: 8;"
+					  prefWidth="200.0">
+					<children>
+						<Label text="PACK VOLTAGE" textFill="#b8c7d9"/>
+						<Label fx:id="lblVoltage" text="0.000 V" textFill="#44d07f">
+							<font>
+								<Font name="System Bold" size="32.0"/>
+							</font>
+						</Label>
+					</children>
+				</VBox>
+
+				<VBox alignment="CENTER" spacing="6.0"
+					  style="-fx-background-color: #2c3b4d; -fx-padding: 18; -fx-background-radius: 8;"
+					  prefWidth="200.0">
+					<children>
+						<Label text="PACK CURRENT" textFill="#b8c7d9"/>
+						<Label fx:id="lblCurrent" text="0.000 A" textFill="#ffb347">
+							<font>
+								<Font name="System Bold" size="32.0"/>
+							</font>
+						</Label>
+					</children>
+				</VBox>
+
+				<VBox alignment="CENTER" spacing="6.0"
+					  style="-fx-background-color: #2c3b4d; -fx-padding: 18; -fx-background-radius: 8;"
+					  prefWidth="200.0">
+					<children>
+						<Label text="SOC" textFill="#b8c7d9"/>
+						<Label fx:id="lblSoc" text="0.00 %" textFill="#66b2ff">
+							<font>
+								<Font name="System Bold" size="32.0"/>
+							</font>
+						</Label>
+					</children>
+				</VBox>
+			</children>
+		</HBox>
+
+		<Label fx:id="lblStatus" text="Status: Waiting for data..." textFill="#d7e2ef"/>
+	</children>
+</VBox>

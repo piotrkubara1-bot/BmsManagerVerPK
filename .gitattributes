@@ -1,0 +1,12 @@
+* text=auto
+
+# Keep shell scripts LF on all platforms
+*.sh text eol=lf
+
+# Keep Windows scripts CRLF
+*.bat text eol=crlf
+
+# Binary assets
+*.jar binary
+*.zip binary
+*.pdf binary
