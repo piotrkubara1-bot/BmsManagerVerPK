@@ -1,74 +1,201 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.chart.LineChart?>
+<?import javafx.scene.chart.NumberAxis?>
+<?import javafx.scene.control.Button?>
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Tab?>
+<?import javafx.scene.control.TabPane?>
+<?import javafx.scene.control.TableColumn?>
+<?import javafx.scene.control.TableView?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.GridPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
 <?import javafx.scene.text.Font?>
-<?import javafx.scene.text.Text?>
 
-<VBox alignment="CENTER" spacing="20.0" prefHeight="420.0" prefWidth="760.0"
-	  style="-fx-background-color: #1f2a37; -fx-padding: 20;"
-	  xmlns="http://javafx.com/javafx/8"
-	  xmlns:fx="http://javafx.com/fxml/1"
-	  fx:controller="FXMLController">
-
-	<children>
-		<Text fill="WHITE" text="BMS REAL-TIME DASHBOARD">
-			<font>
-				<Font name="System Bold" size="24.0"/>
-			</font>
-		</Text>
-
-		<HBox alignment="CENTER" spacing="8.0">
+<BorderPane prefHeight="780.0" prefWidth="1200.0"
+			style="-fx-background-color: #1f2a37;"
+			xmlns="http://javafx.com/javafx/8"
+			xmlns:fx="http://javafx.com/fxml/1"
+			fx:controller="FXMLController">
+	<top>
+		<VBox spacing="8.0" style="-fx-padding: 14 16 10 16;">
 			<children>
-				<Label text="Display Module" textFill="#d7e2ef"/>
-				<ComboBox fx:id="cmbModule" prefWidth="120.0"/>
+				<Label text="BMS Operations Console (Desktop)" textFill="WHITE">
+					<font>
+						<Font name="System Bold" size="22.0"/>
+					</font>
+				</Label>
+				<Label fx:id="lblConnection" text="Connecting..." textFill="#d7e2ef"/>
 			</children>
-		</HBox>
+		</VBox>
+	</top>
 
-		<HBox alignment="CENTER" spacing="24.0">
-			<children>
-				<VBox alignment="CENTER" spacing="6.0"
-					  style="-fx-background-color: #2c3b4d; -fx-padding: 18; -fx-background-radius: 8;"
-					  prefWidth="200.0">
-					<children>
-						<Label text="PACK VOLTAGE" textFill="#b8c7d9"/>
-						<Label fx:id="lblVoltage" text="0.000 V" textFill="#44d07f">
-							<font>
-								<Font name="System Bold" size="32.0"/>
-							</font>
-						</Label>
-					</children>
-				</VBox>
+	<center>
+		<TabPane tabClosingPolicy="UNAVAILABLE">
+			<tabs>
+				<Tab text="Live Data">
+					<content>
+						<VBox spacing="12.0" style="-fx-padding: 14;">
+							<children>
+								<HBox spacing="8.0" alignment="CENTER_LEFT">
+									<children>
+										<Label text="Display Module" textFill="#d7e2ef"/>
+										<ComboBox fx:id="cmbLiveModule" prefWidth="120.0"/>
+									</children>
+								</HBox>
 
-				<VBox alignment="CENTER" spacing="6.0"
-					  style="-fx-background-color: #2c3b4d; -fx-padding: 18; -fx-background-radius: 8;"
-					  prefWidth="200.0">
-					<children>
-						<Label text="PACK CURRENT" textFill="#b8c7d9"/>
-						<Label fx:id="lblCurrent" text="0.000 A" textFill="#ffb347">
-							<font>
-								<Font name="System Bold" size="32.0"/>
-							</font>
-						</Label>
-					</children>
-				</VBox>
+								<HBox spacing="12.0">
+									<children>
+										<VBox spacing="4.0" prefWidth="230.0" style="-fx-background-color: #2c3b4d; -fx-padding: 14; -fx-background-radius: 8;">
+											<children>
+												<Label text="PACK VOLTAGE" textFill="#b8c7d9"/>
+												<Label fx:id="lblVoltage" text="0.000 V" textFill="#44d07f">
+													<font>
+														<Font name="System Bold" size="26.0"/>
+													</font>
+												</Label>
+											</children>
+										</VBox>
 
-				<VBox alignment="CENTER" spacing="6.0"
-					  style="-fx-background-color: #2c3b4d; -fx-padding: 18; -fx-background-radius: 8;"
-					  prefWidth="200.0">
-					<children>
-						<Label text="SOC" textFill="#b8c7d9"/>
-						<Label fx:id="lblSoc" text="0.00 %" textFill="#66b2ff">
-							<font>
-								<Font name="System Bold" size="32.0"/>
-							</font>
-						</Label>
-					</children>
-				</VBox>
-			</children>
-		</HBox>
+										<VBox spacing="4.0" prefWidth="230.0" style="-fx-background-color: #2c3b4d; -fx-padding: 14; -fx-background-radius: 8;">
+											<children>
+												<Label text="PACK CURRENT" textFill="#b8c7d9"/>
+												<Label fx:id="lblCurrent" text="0.000 A" textFill="#ffb347">
+													<font>
+														<Font name="System Bold" size="26.0"/>
+													</font>
+												</Label>
+											</children>
+										</VBox>
 
-		<Label fx:id="lblStatus" text="Status: Waiting for data..." textFill="#d7e2ef"/>
-	</children>
-</VBox>
+										<VBox spacing="4.0" prefWidth="230.0" style="-fx-background-color: #2c3b4d; -fx-padding: 14; -fx-background-radius: 8;">
+											<children>
+												<Label text="SOC" textFill="#b8c7d9"/>
+												<Label fx:id="lblSoc" text="0.00 %" textFill="#66b2ff">
+													<font>
+														<Font name="System Bold" size="26.0"/>
+													</font>
+												</Label>
+											</children>
+										</VBox>
+
+										<VBox spacing="4.0" prefWidth="320.0" style="-fx-background-color: #2c3b4d; -fx-padding: 14; -fx-background-radius: 8;">
+											<children>
+												<Label text="STATUS" textFill="#b8c7d9"/>
+												<Label fx:id="lblStatus" text="-" textFill="#f0f4fa" wrapText="true"/>
+											</children>
+										</VBox>
+									</children>
+								</HBox>
+
+								<Label fx:id="lblLiveStatusLine" text="Waiting for data..." textFill="#d7e2ef"/>
+							</children>
+						</VBox>
+					</content>
+				</Tab>
+
+				<Tab text="Events">
+					<content>
+						<VBox spacing="10.0" style="-fx-padding: 14;">
+							<children>
+								<Button fx:id="btnRefreshEvents" text="Refresh Events"/>
+								<TableView fx:id="tblEvents" prefHeight="520.0">
+									<columns>
+										<TableColumn fx:id="colEventTime" text="Timestamp" prefWidth="200.0"/>
+										<TableColumn fx:id="colEventModule" text="Module" prefWidth="80.0"/>
+										<TableColumn fx:id="colEventSeverity" text="Severity" prefWidth="110.0"/>
+										<TableColumn fx:id="colEventCode" text="Code" prefWidth="90.0"/>
+										<TableColumn fx:id="colEventMessage" text="Message" prefWidth="660.0"/>
+									</columns>
+								</TableView>
+							</children>
+						</VBox>
+					</content>
+				</Tab>
+
+				<Tab text="Statistics">
+					<content>
+						<VBox spacing="10.0" style="-fx-padding: 14;">
+							<children>
+								<HBox spacing="8.0" alignment="CENTER_LEFT">
+									<children>
+										<Label text="Module" textFill="#d7e2ef"/>
+										<ComboBox fx:id="cmbStatsModule" prefWidth="120.0"/>
+										<Label text="Time Window" textFill="#d7e2ef"/>
+										<ComboBox fx:id="cmbStatsRange" prefWidth="160.0"/>
+										<Button fx:id="btnRefreshStats" text="Refresh"/>
+									</children>
+								</HBox>
+
+								<GridPane hgap="12.0" vgap="8.0">
+									<children>
+										<Label text="Avg SOC:" textFill="#b8c7d9" GridPane.columnIndex="0" GridPane.rowIndex="0"/>
+										<Label fx:id="lblStatAvgSoc" text="-" textFill="WHITE" GridPane.columnIndex="1" GridPane.rowIndex="0"/>
+
+										<Label text="SOC Range:" textFill="#b8c7d9" GridPane.columnIndex="2" GridPane.rowIndex="0"/>
+										<Label fx:id="lblStatSocRange" text="-" textFill="WHITE" GridPane.columnIndex="3" GridPane.rowIndex="0"/>
+
+										<Label text="Voltage Range:" textFill="#b8c7d9" GridPane.columnIndex="0" GridPane.rowIndex="1"/>
+										<Label fx:id="lblStatVoltageRange" text="-" textFill="WHITE" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
+
+										<Label text="Current Range:" textFill="#b8c7d9" GridPane.columnIndex="2" GridPane.rowIndex="1"/>
+										<Label fx:id="lblStatCurrentRange" text="-" textFill="WHITE" GridPane.columnIndex="3" GridPane.rowIndex="1"/>
+
+										<Label text="Points:" textFill="#b8c7d9" GridPane.columnIndex="0" GridPane.rowIndex="2"/>
+										<Label fx:id="lblStatPoints" text="-" textFill="WHITE" GridPane.columnIndex="1" GridPane.rowIndex="2"/>
+
+										<Label text="Last Status:" textFill="#b8c7d9" GridPane.columnIndex="2" GridPane.rowIndex="2"/>
+										<Label fx:id="lblStatLastStatus" text="-" textFill="WHITE" GridPane.columnIndex="3" GridPane.rowIndex="2"/>
+									</children>
+								</GridPane>
+
+								<LineChart fx:id="chartTelemetry" animated="false" createSymbols="false" prefHeight="420.0">
+									<xAxis>
+										<NumberAxis fx:id="axisTelemetryX" label="Samples (chronological index)"/>
+									</xAxis>
+									<yAxis>
+										<NumberAxis fx:id="axisTelemetryY" label="Value"/>
+									</yAxis>
+								</LineChart>
+							</children>
+						</VBox>
+					</content>
+				</Tab>
+
+				<Tab text="RPi Status">
+					<content>
+						<VBox spacing="10.0" style="-fx-padding: 14;">
+							<children>
+								<Label fx:id="lblRpiSummary" text="Loading RPi status..." textFill="#d7e2ef"/>
+
+								<Label text="Ingest Sources" textFill="WHITE"/>
+								<TableView fx:id="tblRpiSources" prefHeight="220.0">
+									<columns>
+										<TableColumn fx:id="colSourceAddr" text="Source" prefWidth="180.0"/>
+										<TableColumn fx:id="colSourceLastSeen" text="Last Seen" prefWidth="210.0"/>
+										<TableColumn fx:id="colSourceSeconds" text="Seconds Ago" prefWidth="100.0"/>
+										<TableColumn fx:id="colSourceOnline" text="Online" prefWidth="90.0"/>
+										<TableColumn fx:id="colSourceAccepted" text="Accepted" prefWidth="100.0"/>
+										<TableColumn fx:id="colSourceLastModule" text="Last Module" prefWidth="110.0"/>
+									</columns>
+								</TableView>
+
+								<Label text="Modules Freshness" textFill="WHITE"/>
+								<TableView fx:id="tblRpiModules" prefHeight="220.0">
+									<columns>
+										<TableColumn fx:id="colModuleId" text="Module" prefWidth="120.0"/>
+										<TableColumn fx:id="colModuleLastSeen" text="Last Seen" prefWidth="250.0"/>
+										<TableColumn fx:id="colModuleSeconds" text="Seconds Ago" prefWidth="120.0"/>
+										<TableColumn fx:id="colModuleOnline" text="Online" prefWidth="100.0"/>
+									</columns>
+								</TableView>
+							</children>
+						</VBox>
+					</content>
+				</Tab>
+			</tabs>
+		</TabPane>
+	</center>
+</BorderPane>

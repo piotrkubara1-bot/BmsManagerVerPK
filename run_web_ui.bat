@@ -1,6 +1,8 @@
 @echo off
 setlocal
 
+call "%~dp0load_env.bat" >nul 2>nul
+
 if "%WEB_UI_PORT%"=="" set "WEB_UI_PORT=8088"
 set "WEB_ROOT=src\main\resources"
 

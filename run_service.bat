@@ -1,6 +1,8 @@
 @echo off
 setlocal
 
+call "%~dp0load_env.bat" >nul 2>nul
+
 set "MODE=%~1"
 if "%MODE%"=="" set "MODE=normal"
 

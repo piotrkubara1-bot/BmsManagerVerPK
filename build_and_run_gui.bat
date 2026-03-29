@@ -1,44 +1,42 @@
 @echo off
 setlocal enabledelayedexpansion
 
+call "%~dp0load_env.bat" >nul 2>nul
+
 set "MODE=%~1"
 
-if "%JAVAFX_PATH%"=="" set "JAVAFX_PATH=C:\javafx-sdk-21\lib"
-if "%MODULES%"=="" set "MODULES=javafx.controls,javafx.fxml"
-
-if not exist "%JAVAFX_PATH%\javafx.controls.jar" (
-	echo [GUI] JavaFX SDK not found at "%JAVAFX_PATH%".
-	echo [GUI] Set JAVAFX_PATH to your javafx lib folder, e.g.:
-	echo [GUI]   set JAVAFX_PATH=C:\javafx-sdk-21\lib
-	exit /b 1
-)
-
-echo [GUI] Compiling Java sources...
-if not exist bin mkdir bin
-
-> .java_sources.txt (
-	for /r "src\main\java" %%F in (*.java) do (
-		set "p=%%F"
-		set "p=!p:%CD%\=!"
-		echo !p!
-	)
-)
-
-javac --module-path "%JAVAFX_PATH%" --add-modules %MODULES% -d bin @.java_sources.txt
+where mvn >nul 2>nul
 if errorlevel 1 (
-	echo [GUI] Compilation failed.
-	del .java_sources.txt >nul 2>nul
+	echo [GUI] Maven is required but not found in PATH.
 	exit /b 1
 )
 
-del .java_sources.txt >nul 2>nul
-
-xcopy /E /Y /I "src\main\resources\*" "bin\" >nul
-
-if /I "%MODE%"=="--compile-only" (
-	echo [GUI] Compile-only mode complete.
-	exit /b 0
+if not exist "%~dp0pom.xml" (
+	echo [GUI] pom.xml not found. Maven mode cannot continue.
+	exit /b 1
 )
 
-echo [GUI] Starting MainGUI...
-java --module-path "%JAVAFX_PATH%" --add-modules %MODULES% -cp bin MainGUI
+echo [GUI] Maven mode only.
+if /I "%MODE%"=="--compile-only" (
+	call mvn -q -DskipTests compile
+	exit /b %ERRORLEVEL%
+)
+
+if /I "%MODE%"=="--package" (
+	echo [GUI] Packaging standalone JAR...
+	call mvn -q -Pgui-standalone -DskipTests clean package
+	exit /b %ERRORLEVEL%
+)
+
+if /I "%MODE%"=="--run-jar" (
+	if not exist "%~dp0target\bms-gui-standalone.jar" (
+		echo [GUI] Standalone JAR not found. Building it first...
+		call mvn -q -Pgui-standalone -DskipTests clean package
+		if errorlevel 1 exit /b %ERRORLEVEL%
+	)
+	java -jar "%~dp0target\bms-gui-standalone.jar"
+	exit /b %ERRORLEVEL%
+)
+
+call mvn -q -DskipTests javafx:run
+exit /b %ERRORLEVEL%

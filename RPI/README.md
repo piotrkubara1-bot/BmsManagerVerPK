@@ -45,6 +45,7 @@ Set at least:
 - `SERIAL_PORT` (for example `/dev/ttyUSB0`)
 - `SERIAL_BAUD`
 - `DEFAULT_MODULE_ID` (used when module id is missing in incoming lines)
+- `HEARTBEAT_INTERVAL_SEC` (seconds between keep-alive `HEARTBEAT` lines; set `0` to disable)
 
 ## 3. Run Manually
 
@@ -90,6 +91,7 @@ The sender forwards only lines starting with:
 
 - `BMS,`
 - `EVENT,`
+- `HEARTBEAT` (generated periodically by sender for source liveness)
 
 If module id is missing, sender injects `DEFAULT_MODULE_ID` as the second field.
 
@@ -97,6 +99,7 @@ Examples accepted by host:
 
 - `BMS,2,15.5,0.2,85000000,155,4100,4098,4097`
 - `EVENT,2,49,WARN,Cell imbalance detected`
+- `HEARTBEAT`
 
 ## 6. Quick End-to-End Check
 

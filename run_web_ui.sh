@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/load_env.sh"
+
 WEB_UI_PORT="${WEB_UI_PORT:-8088}"
 WEB_ROOT="src/main/resources"
 

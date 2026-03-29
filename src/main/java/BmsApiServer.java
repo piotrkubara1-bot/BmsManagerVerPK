@@ -13,6 +13,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -27,6 +28,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class BmsApiServer {
 	private static final int DEFAULT_PORT = 8090;
@@ -49,12 +53,16 @@ public class BmsApiServer {
 	};
 
 	private static volatile Connection dbConnection;
+	private static volatile ScheduledExecutorService retentionExecutor;
 
 	public static void main(String[] args) throws IOException {
 		int port = parseIntEnv("BMS_API_PORT", DEFAULT_PORT);
+		int retentionDays = parseIntEnv("BMS_DB_RETENTION_DAYS", 7);
+		int retentionIntervalMinutes = parseIntEnv("BMS_DB_RETENTION_INTERVAL_MIN", 60);
 		allowedModules.addAll(parseAllowedModules(System.getenv("BMS_ALLOWED_MODULES")));
 		initSettingsDefaults();
 		initDatabase();
+		startRetentionTask(retentionDays, retentionIntervalMinutes);
 		loadSettingsFromDb();
 		persistAllSettingsIfMissing();
 
@@ -65,6 +73,7 @@ public class BmsApiServer {
 		server.createContext("/api/history", new HistoryHandler());
 		server.createContext("/api/events", new EventHandler());
 		server.createContext("/api/statistics", new StatisticsHandler());
+		server.createContext("/api/rpi-status", new RpiStatusHandler());
 		server.createContext("/api/cell-settings", new CellSettingsHandler());
 		server.setExecutor(null);
 
@@ -75,13 +84,14 @@ public class BmsApiServer {
 		if (!allowedModules.isEmpty()) {
 			System.out.println("[BmsApiServer] Allowed modules: " + allowedModules);
 		}
+		Runtime.getRuntime().addShutdownHook(new Thread(BmsApiServer::shutdownRetentionTask));
 		server.start();
 	}
 
 	private static void initDatabase() {
-		String jdbcUrl = env("BMS_DB_URL", "jdbc:mysql://localhost:3306/bms?useSSL=false&allowPublicKeyRetrieval=true");
-		String dbUser = env("BMS_DB_USER", "root");
-		String dbPass = env("BMS_DB_PASS", "");
+		String jdbcUrl = resolveDbUrl();
+		String dbUser = resolveDbUser();
+		String dbPass = resolveDbPass();
 
 		try {
 			dbConnection = DriverManager.getConnection(jdbcUrl, dbUser, dbPass);
@@ -133,12 +143,84 @@ public class BmsApiServer {
 						"PRIMARY KEY (module_id, key_name)" +
 					")"
 				);
+				statement.executeUpdate(
+					"CREATE TABLE IF NOT EXISTS bms_ingest_sources (" +
+						"source_addr VARCHAR(128) PRIMARY KEY," +
+						"last_seen TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
+						"accepted_count BIGINT NOT NULL DEFAULT 0," +
+						"last_payload TEXT NULL," +
+						"last_module_id TINYINT NULL" +
+					")"
+				);
 			}
 			System.out.println("[BmsApiServer] Database initialized.");
 		} catch (Exception ex) {
 			dbConnection = null;
 			System.err.println("[BmsApiServer] DB init failed: " + ex.getMessage());
 		}
+	}
+
+	private static void startRetentionTask(int retentionDays, int retentionIntervalMinutes) {
+		if (dbConnection == null) {
+			return;
+		}
+		if (retentionDays <= 0) {
+			System.out.println("[BmsApiServer] DB retention disabled (BMS_DB_RETENTION_DAYS <= 0).");
+			return;
+		}
+		if (retentionIntervalMinutes < 1) {
+			retentionIntervalMinutes = 60;
+		}
+
+		purgeOldData(retentionDays);
+
+		final int retentionDaysFinal = retentionDays;
+		retentionExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+			Thread thread = new Thread(runnable, "bms-db-retention");
+			thread.setDaemon(true);
+			return thread;
+		});
+		retentionExecutor.scheduleAtFixedRate(
+			() -> purgeOldData(retentionDaysFinal),
+			retentionIntervalMinutes,
+			retentionIntervalMinutes,
+			TimeUnit.MINUTES
+		);
+		System.out.println(
+			"[BmsApiServer] DB retention enabled: keep " + retentionDays +
+			" day(s), cleanup every " + retentionIntervalMinutes + " minute(s)."
+		);
+	}
+
+	private static void purgeOldData(int retentionDays) {
+		if (dbConnection == null || retentionDays <= 0) {
+			return;
+		}
+
+		String cutoffExpression = "NOW() - INTERVAL " + retentionDays + " DAY";
+		String purgeEventsSql = "DELETE FROM bms_events WHERE created_at < " + cutoffExpression;
+		String purgeReadingsSql = "DELETE FROM bms_readings WHERE created_at < " + cutoffExpression;
+
+		try (Statement statement = dbConnection.createStatement()) {
+			int deletedEvents = statement.executeUpdate(purgeEventsSql);
+			int deletedReadings = statement.executeUpdate(purgeReadingsSql);
+			if (deletedEvents > 0 || deletedReadings > 0) {
+				System.out.println(
+					"[BmsApiServer] Retention purge: deleted readings=" + deletedReadings +
+					", events=" + deletedEvents
+				);
+			}
+		} catch (Exception ex) {
+			System.err.println("[BmsApiServer] Retention purge failed: " + ex.getMessage());
+		}
+	}
+
+	private static void shutdownRetentionTask() {
+		ScheduledExecutorService executor = retentionExecutor;
+		if (executor == null) {
+			return;
+		}
+		executor.shutdownNow();
 	}
 
 	private static void initSettingsDefaults() {
@@ -210,19 +292,19 @@ public class BmsApiServer {
 		}
 	}
 
-	private static void ingestLine(String line) {
+	private static IngestResult ingestLine(String line) {
 		String trimmed = line == null ? "" : line.trim();
 		if (trimmed.isEmpty()) {
-			return;
+			return IngestResult.rejected();
 		}
 
 		if (trimmed.startsWith("BMS")) {
 			BmsReading reading = parseBms(trimmed);
 			if (reading == null) {
-				return;
+				return IngestResult.rejected();
 			}
 			if (!allowedModules.isEmpty() && !allowedModules.contains(reading.moduleId)) {
-				return;
+				return IngestResult.rejected();
 			}
 
 			synchronized (LOCK) {
@@ -233,16 +315,16 @@ public class BmsApiServer {
 				}
 			}
 			persistReading(reading);
-			return;
+			return IngestResult.accepted(reading.moduleId, false, trimmed);
 		}
 
 		if (trimmed.startsWith("EVENT")) {
 			BmsEvent event = parseEvent(trimmed);
 			if (event == null) {
-				return;
+				return IngestResult.rejected();
 			}
 			if (!allowedModules.isEmpty() && !allowedModules.contains(event.moduleId)) {
-				return;
+				return IngestResult.rejected();
 			}
 
 			synchronized (LOCK) {
@@ -252,6 +334,52 @@ public class BmsApiServer {
 				}
 			}
 			persistEvent(event);
+			return IngestResult.accepted(event.moduleId, false, trimmed);
+		}
+
+		if (trimmed.startsWith("HEARTBEAT")) {
+			int moduleId = parseHeartbeatModuleId(trimmed);
+			if (moduleId > 0 && !allowedModules.isEmpty() && !allowedModules.contains(moduleId)) {
+				return IngestResult.rejected();
+			}
+			return IngestResult.accepted(moduleId, true, trimmed);
+		}
+
+		return IngestResult.rejected();
+	}
+
+	private static int parseHeartbeatModuleId(String line) {
+		String[] parts = line.split(",");
+		if (parts.length < 2 || !isInteger(parts[1])) {
+			return 0;
+		}
+		int moduleId = safeInt(parts[1], 0);
+		return moduleId >= 1 && moduleId <= 4 ? moduleId : 0;
+	}
+
+	private static void persistIngestSource(String sourceAddr, int acceptedCount, int heartbeatCount, String lastPayload, int lastModuleId) {
+		if (dbConnection == null || sourceAddr == null || sourceAddr.isBlank() || (acceptedCount <= 0 && heartbeatCount <= 0)) {
+			return;
+		}
+
+		String sql =
+			"INSERT INTO bms_ingest_sources (source_addr, accepted_count, last_payload, last_module_id) VALUES (?, ?, ?, ?) " +
+			"ON DUPLICATE KEY UPDATE last_seen = CURRENT_TIMESTAMP, accepted_count = accepted_count + VALUES(accepted_count), " +
+			"last_payload = CASE WHEN VALUES(last_payload) = '' THEN last_payload ELSE VALUES(last_payload) END, " +
+			"last_module_id = CASE WHEN VALUES(last_module_id) IS NULL THEN last_module_id ELSE VALUES(last_module_id) END";
+
+		try (PreparedStatement stmt = dbConnection.prepareStatement(sql)) {
+			stmt.setString(1, sourceAddr);
+			stmt.setInt(2, acceptedCount);
+			stmt.setString(3, lastPayload == null ? "" : lastPayload);
+			if (lastModuleId > 0) {
+				stmt.setInt(4, lastModuleId);
+			} else {
+				stmt.setNull(4, java.sql.Types.TINYINT);
+			}
+			stmt.executeUpdate();
+		} catch (Exception ex) {
+			System.err.println("[BmsApiServer] Failed to persist ingest source: " + ex.getMessage());
 		}
 	}
 
@@ -414,6 +542,183 @@ public class BmsApiServer {
 		}
 	}
 
+	private static List<BmsReading> queryHistoryFromDb(int moduleId, int limit, Instant since) {
+		List<BmsReading> result = new ArrayList<>();
+		if (dbConnection == null) {
+			return result;
+		}
+
+		StringBuilder sql = new StringBuilder();
+		sql.append("SELECT id, created_at, module_id, voltage_v, current_a, soc_percent, status_code, raw_line ");
+		sql.append("FROM bms_readings WHERE (? = 0 OR module_id = ?)");
+		if (since != null) {
+			sql.append(" AND created_at >= ?");
+		}
+		sql.append(" ORDER BY id DESC LIMIT ?");
+
+		Map<Long, BmsReading> byId = new LinkedHashMap<>();
+		List<Long> ids = new ArrayList<>();
+
+		try (PreparedStatement stmt = dbConnection.prepareStatement(sql.toString())) {
+			stmt.setInt(1, moduleId);
+			stmt.setInt(2, moduleId);
+			int idx = 3;
+			if (since != null) {
+				stmt.setTimestamp(idx++, Timestamp.from(since));
+			}
+			stmt.setInt(idx, limit);
+			try (java.sql.ResultSet rs = stmt.executeQuery()) {
+				while (rs.next()) {
+					long id = rs.getLong("id");
+					BmsReading reading = new BmsReading();
+					Timestamp createdAt = rs.getTimestamp("created_at");
+					reading.timestamp = toIsoTimestamp(createdAt);
+					reading.moduleId = rs.getInt("module_id");
+					reading.voltageV = rs.getDouble("voltage_v");
+					reading.currentA = rs.getDouble("current_a");
+					reading.socPercent = rs.getDouble("soc_percent");
+					reading.statusCode = rs.getInt("status_code");
+					reading.rawLine = rs.getString("raw_line");
+					reading.cellMv = new ArrayList<>();
+					byId.put(id, reading);
+					ids.add(id);
+					result.add(reading);
+				}
+			}
+		} catch (Exception ex) {
+			System.err.println("[BmsApiServer] Failed loading history from DB: " + ex.getMessage());
+			return result;
+		}
+
+		if (ids.isEmpty()) {
+			return result;
+		}
+
+		StringBuilder placeholders = new StringBuilder();
+		for (int i = 0; i < ids.size(); i++) {
+			if (i > 0) {
+				placeholders.append(',');
+			}
+			placeholders.append('?');
+		}
+
+		String cellSql =
+			"SELECT reading_id, cell_index, cell_mv FROM bms_cell_readings " +
+			"WHERE reading_id IN (" + placeholders + ") ORDER BY reading_id DESC, cell_index ASC";
+
+		try (PreparedStatement stmt = dbConnection.prepareStatement(cellSql)) {
+			for (int i = 0; i < ids.size(); i++) {
+				stmt.setLong(i + 1, ids.get(i));
+			}
+			try (java.sql.ResultSet rs = stmt.executeQuery()) {
+				while (rs.next()) {
+					long readingId = rs.getLong("reading_id");
+					BmsReading reading = byId.get(readingId);
+					if (reading != null) {
+						reading.cellMv.add(rs.getInt("cell_mv"));
+					}
+				}
+			}
+		} catch (Exception ex) {
+			System.err.println("[BmsApiServer] Failed loading cell history from DB: " + ex.getMessage());
+		}
+
+		return result;
+	}
+
+	private static Map<Integer, ModuleStats> queryStatisticsFromDb(int moduleId, Instant since) {
+		Map<Integer, ModuleStats> statsByModule = new LinkedHashMap<>();
+		if (dbConnection == null) {
+			return statsByModule;
+		}
+
+		StringBuilder aggregatesSql = new StringBuilder();
+		aggregatesSql.append(
+			"SELECT module_id, COUNT(*) AS sample_count, AVG(soc_percent) AS avg_soc, MIN(soc_percent) AS min_soc, MAX(soc_percent) AS max_soc, " +
+			"MIN(voltage_v) AS min_voltage, MAX(voltage_v) AS max_voltage, MIN(current_a) AS min_current, MAX(current_a) AS max_current " +
+			"FROM bms_readings WHERE (? = 0 OR module_id = ?)"
+		);
+		if (since != null) {
+			aggregatesSql.append(" AND created_at >= ?");
+		}
+		aggregatesSql.append(" GROUP BY module_id ORDER BY module_id");
+
+		try (PreparedStatement stmt = dbConnection.prepareStatement(aggregatesSql.toString())) {
+			stmt.setInt(1, moduleId);
+			stmt.setInt(2, moduleId);
+			if (since != null) {
+				stmt.setTimestamp(3, Timestamp.from(since));
+			}
+			try (java.sql.ResultSet rs = stmt.executeQuery()) {
+				while (rs.next()) {
+					int module = rs.getInt("module_id");
+					ModuleStats stats = new ModuleStats(module);
+					stats.sampleCount = rs.getInt("sample_count");
+					stats.socSum = rs.getDouble("avg_soc") * Math.max(stats.sampleCount, 1);
+					stats.minSoc = rs.getDouble("min_soc");
+					stats.maxSoc = rs.getDouble("max_soc");
+					stats.minVoltage = rs.getDouble("min_voltage");
+					stats.maxVoltage = rs.getDouble("max_voltage");
+					stats.minCurrent = rs.getDouble("min_current");
+					stats.maxCurrent = rs.getDouble("max_current");
+					statsByModule.put(module, stats);
+				}
+			}
+		} catch (Exception ex) {
+			System.err.println("[BmsApiServer] Failed loading statistics from DB: " + ex.getMessage());
+			return statsByModule;
+		}
+
+		StringBuilder latestSql = new StringBuilder();
+		latestSql.append("SELECT r.module_id, r.status_code, r.created_at FROM bms_readings r ");
+		latestSql.append("JOIN (SELECT module_id, MAX(id) AS max_id FROM bms_readings WHERE (? = 0 OR module_id = ?)");
+		if (since != null) {
+			latestSql.append(" AND created_at >= ?");
+		}
+		latestSql.append(" GROUP BY module_id) x ON r.id = x.max_id ORDER BY r.module_id");
+
+		try (PreparedStatement stmt = dbConnection.prepareStatement(latestSql.toString())) {
+			stmt.setInt(1, moduleId);
+			stmt.setInt(2, moduleId);
+			if (since != null) {
+				stmt.setTimestamp(3, Timestamp.from(since));
+			}
+			try (java.sql.ResultSet rs = stmt.executeQuery()) {
+				while (rs.next()) {
+					int module = rs.getInt("module_id");
+					ModuleStats stats = statsByModule.computeIfAbsent(module, ModuleStats::new);
+					stats.lastStatusCode = rs.getInt("status_code");
+					stats.lastTimestamp = toIsoTimestamp(rs.getTimestamp("created_at"));
+				}
+			}
+		} catch (Exception ex) {
+			System.err.println("[BmsApiServer] Failed loading latest status from DB: " + ex.getMessage());
+		}
+
+		return statsByModule;
+	}
+
+	private static String toIsoTimestamp(Timestamp timestamp) {
+		if (timestamp == null) {
+			return "";
+		}
+		return timestamp.toInstant().toString();
+	}
+
+	private static long secondsSince(Instant instant) {
+		long diff = Instant.now().getEpochSecond() - instant.getEpochSecond();
+		return Math.max(diff, 0);
+	}
+
+	private static Instant parseSinceCutoff(Map<String, String> query) {
+		int minutes = safeInt(query.get("sinceMinutes"), 0);
+		if (minutes <= 0) {
+			return null;
+		}
+		int capped = Math.min(minutes, 7 * 24 * 60);
+		return Instant.now().minusSeconds((long) capped * 60L);
+	}
+
 	private static class HealthHandler implements HttpHandler {
 		@Override
 		public void handle(HttpExchange exchange) throws IOException {
@@ -468,22 +773,40 @@ public class BmsApiServer {
 			}
 
 			int accepted = 0;
+			int heartbeat = 0;
 			int rejected = 0;
+			int lastAcceptedModuleId = 0;
+			String lastAcceptedPayload = "";
+			String sourceAddr = "unknown";
+			if (exchange.getRemoteAddress() != null && exchange.getRemoteAddress().getAddress() != null) {
+				sourceAddr = exchange.getRemoteAddress().getAddress().getHostAddress();
+			}
+
 			String[] lines = body.split("\\r?\\n");
 			for (String line : lines) {
 				String trimmed = line.trim();
 				if (trimmed.isEmpty()) {
 					continue;
 				}
-				if (trimmed.startsWith("BMS") || trimmed.startsWith("EVENT")) {
-					ingestLine(trimmed);
-					accepted++;
+				IngestResult result = ingestLine(trimmed);
+				if (result.accepted) {
+					if (result.heartbeat) {
+						heartbeat++;
+					} else {
+						accepted++;
+					}
+					if (result.moduleId > 0) {
+						lastAcceptedModuleId = result.moduleId;
+					}
+					lastAcceptedPayload = result.normalizedPayload;
 				} else {
 					rejected++;
 				}
 			}
 
-			String response = "{\"accepted\":" + accepted + ",\"rejected\":" + rejected + "}";
+			persistIngestSource(sourceAddr, accepted, heartbeat, lastAcceptedPayload, lastAcceptedModuleId);
+
+			String response = "{\"accepted\":" + accepted + ",\"heartbeat\":" + heartbeat + ",\"rejected\":" + rejected + "}";
 			writeJson(exchange, 200, response);
 		}
 	}
@@ -536,6 +859,7 @@ public class BmsApiServer {
 			Map<String, String> query = parseQuery(exchange.getRequestURI().getQuery());
 			int moduleId = safeInt(query.get("moduleId"), 0);
 			int limit = safeInt(query.get("limit"), 200);
+			Instant since = parseSinceCutoff(query);
 			if (limit < 1) {
 				limit = 1;
 			}
@@ -543,15 +867,29 @@ public class BmsApiServer {
 				limit = 2000;
 			}
 
-			List<BmsReading> snapshot = new ArrayList<>();
-			synchronized (LOCK) {
-				for (BmsReading item : history) {
-					if (moduleId > 0 && item.moduleId != moduleId) {
-						continue;
-					}
-					snapshot.add(item);
-					if (snapshot.size() >= limit) {
-						break;
+			List<BmsReading> snapshot;
+			if (dbConnection != null) {
+				snapshot = queryHistoryFromDb(moduleId, limit, since);
+			} else {
+				snapshot = new ArrayList<>();
+				synchronized (LOCK) {
+					for (BmsReading item : history) {
+						if (moduleId > 0 && item.moduleId != moduleId) {
+							continue;
+						}
+						if (since != null) {
+							try {
+								if (Instant.parse(item.timestamp).isBefore(since)) {
+									continue;
+								}
+							} catch (Exception ignored) {
+								continue;
+							}
+						}
+						snapshot.add(item);
+						if (snapshot.size() >= limit) {
+							break;
+						}
 					}
 				}
 			}
@@ -625,19 +963,34 @@ public class BmsApiServer {
 
 			Map<String, String> query = parseQuery(exchange.getRequestURI().getQuery());
 			int moduleId = safeInt(query.get("moduleId"), 0);
+			Instant since = parseSinceCutoff(query);
 
-			Map<Integer, ModuleStats> statsByModule = new LinkedHashMap<>();
-			synchronized (LOCK) {
-				for (BmsReading reading : history) {
-					if (moduleId > 0 && reading.moduleId != moduleId) {
-						continue;
+			Map<Integer, ModuleStats> statsByModule;
+			if (dbConnection != null) {
+				statsByModule = queryStatisticsFromDb(moduleId, since);
+			} else {
+				statsByModule = new LinkedHashMap<>();
+				synchronized (LOCK) {
+					for (BmsReading reading : history) {
+						if (moduleId > 0 && reading.moduleId != moduleId) {
+							continue;
+						}
+						if (since != null) {
+							try {
+								if (Instant.parse(reading.timestamp).isBefore(since)) {
+									continue;
+								}
+							} catch (Exception ignored) {
+								continue;
+							}
+						}
+						ModuleStats stats = statsByModule.get(reading.moduleId);
+						if (stats == null) {
+							stats = new ModuleStats(reading.moduleId);
+							statsByModule.put(reading.moduleId, stats);
+						}
+						stats.accept(reading);
 					}
-					ModuleStats stats = statsByModule.get(reading.moduleId);
-					if (stats == null) {
-						stats = new ModuleStats(reading.moduleId);
-						statsByModule.put(reading.moduleId, stats);
-					}
-					stats.accept(reading);
 				}
 			}
 
@@ -653,6 +1006,125 @@ public class BmsApiServer {
 			}
 			sb.append(']');
 			writeJson(exchange, 200, sb.toString());
+		}
+	}
+
+	private static class RpiStatusHandler implements HttpHandler {
+		@Override
+		public void handle(HttpExchange exchange) throws IOException {
+			if (handleCorsAndPreflight(exchange)) {
+				return;
+			}
+			if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+				writeJson(exchange, 405, "{\"error\":\"Method not allowed\"}");
+				return;
+			}
+
+			int offlineThresholdSec = parseIntEnv("BMS_RPI_OFFLINE_SECONDS", 30);
+			if (offlineThresholdSec < 1) {
+				offlineThresholdSec = 30;
+			}
+
+			StringBuilder sourcesJson = new StringBuilder();
+			sourcesJson.append('[');
+			boolean firstSource = true;
+			boolean anyOnline = false;
+
+			if (dbConnection != null) {
+				String sql =
+					"SELECT source_addr, last_seen, accepted_count, last_module_id, last_payload " +
+					"FROM bms_ingest_sources ORDER BY last_seen DESC LIMIT 20";
+				try (Statement stmt = dbConnection.createStatement();
+					 java.sql.ResultSet rs = stmt.executeQuery(sql)) {
+					while (rs.next()) {
+						Timestamp lastSeenTs = rs.getTimestamp("last_seen");
+						String lastSeen = toIsoTimestamp(lastSeenTs);
+						long seconds = lastSeenTs == null ? Long.MAX_VALUE : secondsSince(lastSeenTs.toInstant());
+						boolean online = seconds <= offlineThresholdSec;
+						if (online) {
+							anyOnline = true;
+						}
+
+						if (!firstSource) {
+							sourcesJson.append(',');
+						}
+						firstSource = false;
+
+						sourcesJson.append("{\"source\":\"").append(escapeJson(rs.getString("source_addr"))).append("\"");
+						sourcesJson.append(",\"lastSeen\":\"").append(escapeJson(lastSeen)).append("\"");
+						sourcesJson.append(",\"secondsSinceSeen\":").append(seconds == Long.MAX_VALUE ? -1 : seconds);
+						sourcesJson.append(",\"online\":").append(online);
+						sourcesJson.append(",\"acceptedCount\":").append(rs.getLong("accepted_count"));
+						int lastModule = rs.getInt("last_module_id");
+						if (rs.wasNull()) {
+							sourcesJson.append(",\"lastModuleId\":null");
+						} else {
+							sourcesJson.append(",\"lastModuleId\":").append(lastModule);
+						}
+						sourcesJson.append(",\"lastPayload\":\"").append(escapeJson(rs.getString("last_payload"))).append("\"}");
+					}
+				} catch (Exception ex) {
+					System.err.println("[BmsApiServer] Failed loading RPi sources from DB: " + ex.getMessage());
+				}
+			}
+			sourcesJson.append(']');
+
+			Map<Integer, Instant> moduleLastSeen = new HashMap<>();
+			if (dbConnection != null) {
+				String moduleSql =
+					"SELECT module_id, MAX(created_at) AS last_seen FROM bms_readings GROUP BY module_id";
+				try (Statement stmt = dbConnection.createStatement();
+					 java.sql.ResultSet rs = stmt.executeQuery(moduleSql)) {
+					while (rs.next()) {
+						Timestamp ts = rs.getTimestamp("last_seen");
+						if (ts != null) {
+							moduleLastSeen.put(rs.getInt("module_id"), ts.toInstant());
+						}
+					}
+				} catch (Exception ex) {
+					System.err.println("[BmsApiServer] Failed loading module last-seen from DB: " + ex.getMessage());
+				}
+			} else {
+				for (Map.Entry<Integer, BmsReading> entry : latestByModule.entrySet()) {
+					try {
+						moduleLastSeen.put(entry.getKey(), Instant.parse(entry.getValue().timestamp));
+					} catch (Exception ignored) {
+						// ignore malformed timestamps
+					}
+				}
+			}
+
+			StringBuilder modulesJson = new StringBuilder();
+			modulesJson.append('[');
+			for (int moduleId = 1; moduleId <= 4; moduleId++) {
+				if (moduleId > 1) {
+					modulesJson.append(',');
+				}
+				Instant lastSeen = moduleLastSeen.get(moduleId);
+				long seconds = lastSeen == null ? Long.MAX_VALUE : secondsSince(lastSeen);
+				boolean online = seconds <= offlineThresholdSec;
+				if (online) {
+					anyOnline = true;
+				}
+
+				modulesJson.append("{\"moduleId\":").append(moduleId);
+				if (lastSeen == null) {
+					modulesJson.append(",\"lastSeen\":\"\"");
+					modulesJson.append(",\"secondsSinceSeen\":-1");
+				} else {
+					modulesJson.append(",\"lastSeen\":\"").append(escapeJson(lastSeen.toString())).append("\"");
+					modulesJson.append(",\"secondsSinceSeen\":").append(seconds);
+				}
+				modulesJson.append(",\"online\":").append(online).append('}');
+			}
+			modulesJson.append(']');
+
+			String json =
+				"{\"offlineThresholdSec\":" + offlineThresholdSec +
+				",\"overallOnline\":" + anyOnline +
+				",\"sources\":" + sourcesJson +
+				",\"modules\":" + modulesJson + "}";
+			writeJson(exchange, 200, json);
 		}
 	}
 
@@ -829,6 +1301,35 @@ public class BmsApiServer {
 		return value == null || value.trim().isEmpty() ? fallback : value.trim();
 	}
 
+	private static String resolveDbUrl() {
+		String explicit = env("BMS_DB_URL", "");
+		if (!explicit.isEmpty()) {
+			return explicit;
+		}
+
+		String host = env("DB_HOST", "localhost");
+		String port = env("DB_PORT", "3306");
+		String dbName = env("DB_NAME", "bms");
+		return "jdbc:mysql://" + host + ":" + port + "/" + dbName + "?useSSL=false&allowPublicKeyRetrieval=true";
+	}
+
+	private static String resolveDbUser() {
+		return firstNonBlank(System.getenv("BMS_DB_USER"), System.getenv("DB_USER"), "root");
+	}
+
+	private static String resolveDbPass() {
+		return firstNonBlank(System.getenv("BMS_DB_PASS"), System.getenv("DB_PASSWORD"), "");
+	}
+
+	private static String firstNonBlank(String... values) {
+		for (String value : values) {
+			if (value != null && !value.trim().isEmpty()) {
+				return value.trim();
+			}
+		}
+		return "";
+	}
+
 	private static SettingDefinition getSettingDefinition(String key) {
 		if (key == null) {
 			return null;
@@ -933,6 +1434,28 @@ public class BmsApiServer {
 			sb.append(']');
 			sb.append(",\"rawLine\":\"").append(escapeJson(rawLine)).append("\"}");
 			return sb.toString();
+		}
+	}
+
+	private static class IngestResult {
+		final boolean accepted;
+		final boolean heartbeat;
+		final int moduleId;
+		final String normalizedPayload;
+
+		private IngestResult(boolean accepted, boolean heartbeat, int moduleId, String normalizedPayload) {
+			this.accepted = accepted;
+			this.heartbeat = heartbeat;
+			this.moduleId = moduleId;
+			this.normalizedPayload = normalizedPayload;
+		}
+
+		static IngestResult accepted(int moduleId, boolean heartbeat, String normalizedPayload) {
+			return new IngestResult(true, heartbeat, moduleId, normalizedPayload);
+		}
+
+		static IngestResult rejected() {
+			return new IngestResult(false, false, 0, "");
 		}
 	}
 

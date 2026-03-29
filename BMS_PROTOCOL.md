@@ -51,6 +51,25 @@ Example:
 
 EVENT,3,49,WARN,Cell imbalance detected
 
+### 2.3 HEARTBEAT line
+
+Sender keep-alive format:
+
+HEARTBEAT
+
+Optional module-scoped format:
+
+HEARTBEAT,module_id
+
+Notes:
+
+- Used to keep ingest source freshness alive even when no telemetry frames are available
+- module_id is optional and must be in range 1..4 when provided
+
+Example:
+
+HEARTBEAT,2
+
 ## 3. Validation Rules
 
 - Empty lines are ignored

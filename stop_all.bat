@@ -1,6 +1,8 @@
 @echo off
 setlocal
 
+call "%~dp0load_env.bat" >nul 2>nul
+
 if "%BMS_API_PORT%"=="" set "BMS_API_PORT=8090"
 if "%WEB_UI_PORT%"=="" set "WEB_UI_PORT=8088"
 

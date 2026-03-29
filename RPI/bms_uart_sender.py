@@ -33,6 +33,7 @@ class Config:
     serial_baud: int
     serial_timeout: float
     default_module_id: int
+    heartbeat_interval_sec: float
     post_timeout_sec: float
     retry_backoff_sec: float
     max_queue_lines: int
@@ -50,6 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--serial-baud", type=int, default=int(env_or_default("SERIAL_BAUD", "115200")))
     parser.add_argument("--serial-timeout", type=float, default=float(env_or_default("SERIAL_TIMEOUT", "1.0")))
     parser.add_argument("--default-module-id", type=int, default=int(env_or_default("DEFAULT_MODULE_ID", "1")))
+    parser.add_argument("--heartbeat-interval-sec", type=float, default=float(env_or_default("HEARTBEAT_INTERVAL_SEC", "10")))
     parser.add_argument("--post-timeout-sec", type=float, default=float(env_or_default("POST_TIMEOUT_SEC", "3")))
     parser.add_argument("--retry-backoff-sec", type=float, default=float(env_or_default("RETRY_BACKOFF_SEC", "1.0")))
     parser.add_argument("--max-queue-lines", type=int, default=int(env_or_default("MAX_QUEUE_LINES", "2000")))
@@ -68,6 +70,7 @@ def build_config(args: argparse.Namespace) -> Config:
         serial_baud=args.serial_baud,
         serial_timeout=args.serial_timeout,
         default_module_id=module_id,
+        heartbeat_interval_sec=max(args.heartbeat_interval_sec, 0.0),
         post_timeout_sec=args.post_timeout_sec,
         retry_backoff_sec=args.retry_backoff_sec,
         max_queue_lines=args.max_queue_lines,
@@ -102,6 +105,12 @@ def normalize_line(line: str, default_module_id: int) -> Optional[str]:
         if len(parts) >= 3 and is_valid_module(parts[1]):
             return ",".join(parts)
         return "EVENT,{module},{payload}".format(module=default_module_id, payload=",".join(parts[1:]))
+
+    if raw == "HEARTBEAT" or raw.startswith("HEARTBEAT,"):
+        parts = [p.strip() for p in raw.split(",")]
+        if len(parts) >= 2 and parts[1] and is_valid_module(parts[1]):
+            return "HEARTBEAT,{module}".format(module=parts[1])
+        return "HEARTBEAT"
 
     return None
 
@@ -163,7 +172,15 @@ def main() -> int:
         try:
             with open_serial(config) as ser:
                 logging.info("sender started host_api_url=%s", config.host_api_url)
+                last_heartbeat_sent = time.monotonic()
                 while RUNNING:
+                    now = time.monotonic()
+                    if config.heartbeat_interval_sec > 0 and now - last_heartbeat_sent >= config.heartbeat_interval_sec:
+                        if len(queue) == queue.maxlen:
+                            dropped_count += 1
+                        queue.append("HEARTBEAT")
+                        last_heartbeat_sent = now
+
                     raw = ser.readline()
                     if not raw:
                         flush_queue(session, config, queue)
