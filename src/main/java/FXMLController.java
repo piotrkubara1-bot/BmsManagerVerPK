@@ -2,6 +2,7 @@ import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.fxml.FXML;
+import javafx.scene.Node;
 import javafx.scene.chart.LineChart;
 import javafx.scene.chart.NumberAxis;
 import javafx.scene.chart.XYChart;
@@ -10,18 +11,29 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
+import javafx.scene.control.TextField;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -29,10 +41,14 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class FXMLController {
-	private static final String INPUT_MODE = env("GUI_INPUT_MODE", "api").toLowerCase();
+	private static final String INPUT_MODE = env("GUI_INPUT_MODE", "api").toLowerCase(Locale.ROOT);
 	private static final String API_BASE = env("GUI_API_BASE", "http://127.0.0.1:8090");
 	private static final int DEFAULT_MODULE_ID = parseDisplayModuleId();
 	private static final int HISTORY_LIMIT = 400;
+	private static final List<String> CHART_ORDER = Arrays.asList("voltage", "current", "soc", "status", "cells");
+	private static final String[] CELL_SERIES_COLORS = new String[] {
+		"#67b6ff", "#f7c453", "#38d889", "#ff8ea0", "#b7a1ff", "#ff6a2a", "#8fd6a3", "#9ad0ff"
+	};
 
 	@FXML
 	private Label lblConnection;
@@ -104,13 +120,97 @@ public class FXMLController {
 	private Label lblStatLastStatus;
 
 	@FXML
-	private NumberAxis axisTelemetryX;
+	private GridPane statsChartsGrid;
 
 	@FXML
-	private NumberAxis axisTelemetryY;
+	private VBox chartCardVoltage;
 
 	@FXML
-	private LineChart<Number, Number> chartTelemetry;
+	private VBox chartCardCurrent;
+
+	@FXML
+	private VBox chartCardSoc;
+
+	@FXML
+	private VBox chartCardStatus;
+
+	@FXML
+	private VBox chartCardCells;
+
+	@FXML
+	private Button btnZoomVoltage;
+
+	@FXML
+	private Button btnZoomCurrent;
+
+	@FXML
+	private Button btnZoomSoc;
+
+	@FXML
+	private Button btnZoomStatus;
+
+	@FXML
+	private Button btnZoomCells;
+
+	@FXML
+	private LineChart<Number, Number> chartVoltage;
+
+	@FXML
+	private LineChart<Number, Number> chartCurrent;
+
+	@FXML
+	private LineChart<Number, Number> chartSoc;
+
+	@FXML
+	private LineChart<Number, Number> chartStatus;
+
+	@FXML
+	private LineChart<Number, Number> chartCells;
+
+	@FXML
+	private ComboBox<String> cmbSettingsModule;
+
+	@FXML
+	private ComboBox<String> cmbSettingsKey;
+
+	@FXML
+	private TextField txtSettingsValue;
+
+	@FXML
+	private Button btnApplySetting;
+
+	@FXML
+	private Label lblSettingsStatus;
+
+	@FXML
+	private TableView<SettingRow> tblSettings;
+
+	@FXML
+	private TableColumn<SettingRow, String> colSettingLabel;
+
+	@FXML
+	private TableColumn<SettingRow, String> colSettingUnit;
+
+	@FXML
+	private TableColumn<SettingRow, String> colSettingMin;
+
+	@FXML
+	private TableColumn<SettingRow, String> colSettingMax;
+
+	@FXML
+	private TableColumn<SettingRow, String> colSettingM1;
+
+	@FXML
+	private TableColumn<SettingRow, String> colSettingM2;
+
+	@FXML
+	private TableColumn<SettingRow, String> colSettingM3;
+
+	@FXML
+	private TableColumn<SettingRow, String> colSettingM4;
+
+	@FXML
+	private TableColumn<SettingRow, String> colSettingWritable;
 
 	@FXML
 	private Label lblRpiSummary;
@@ -151,13 +251,19 @@ public class FXMLController {
 	@FXML
 	private TableColumn<ModuleRow, String> colModuleOnline;
 
+	private final Map<String, VBox> chartCards = new LinkedHashMap<>();
+	private final Map<String, Button> chartZoomButtons = new LinkedHashMap<>();
+	private final Map<String, LineChart<Number, Number>> chartsByKey = new LinkedHashMap<>();
+	private final Map<String, String> settingsDisplayToKey = new LinkedHashMap<>();
+
 	private ScheduledExecutorService poller;
 	private volatile boolean refreshRunning;
+	private volatile String zoomedChartKey;
 
 	public void initialize() {
 		initCombos();
 		initTables();
-		initChart();
+		initCharts();
 		wireActions();
 
 		if ("stdin".equals(INPUT_MODE)) {
@@ -183,6 +289,10 @@ public class FXMLController {
 		if (cmbStatsRange != null) {
 			cmbStatsRange.getItems().setAll("5 min", "15 min", "30 min", "1 h", "3 h", "6 h", "12 h", "24 h");
 			cmbStatsRange.setValue("1 h");
+		}
+		if (cmbSettingsModule != null) {
+			cmbSettingsModule.getItems().setAll("1", "2", "3", "4");
+			cmbSettingsModule.setValue(String.valueOf(DEFAULT_MODULE_ID));
 		}
 	}
 
@@ -210,16 +320,201 @@ public class FXMLController {
 			colModuleSeconds.setCellValueFactory(data -> data.getValue().secondsProperty());
 			colModuleOnline.setCellValueFactory(data -> data.getValue().onlineProperty());
 		}
+
+		if (colSettingLabel != null) {
+			colSettingLabel.setCellValueFactory(data -> data.getValue().labelProperty());
+			colSettingUnit.setCellValueFactory(data -> data.getValue().unitProperty());
+			colSettingMin.setCellValueFactory(data -> data.getValue().minProperty());
+			colSettingMax.setCellValueFactory(data -> data.getValue().maxProperty());
+			colSettingM1.setCellValueFactory(data -> data.getValue().module1Property());
+			colSettingM2.setCellValueFactory(data -> data.getValue().module2Property());
+			colSettingM3.setCellValueFactory(data -> data.getValue().module3Property());
+			colSettingM4.setCellValueFactory(data -> data.getValue().module4Property());
+			colSettingWritable.setCellValueFactory(data -> data.getValue().writableProperty());
+		}
 	}
 
-	private void initChart() {
-		if (chartTelemetry == null) {
+	private void initCharts() {
+		registerChart("voltage", chartCardVoltage, btnZoomVoltage, chartVoltage);
+		registerChart("current", chartCardCurrent, btnZoomCurrent, chartCurrent);
+		registerChart("soc", chartCardSoc, btnZoomSoc, chartSoc);
+		registerChart("status", chartCardStatus, btnZoomStatus, chartStatus);
+		registerChart("cells", chartCardCells, btnZoomCells, chartCells);
+		renderChartLayout();
+	}
+
+	private void registerChart(String key, VBox card, Button zoomButton, LineChart<Number, Number> chart) {
+		if (card != null) {
+			chartCards.put(key, card);
+		}
+		if (zoomButton != null) {
+			chartZoomButtons.put(key, zoomButton);
+			zoomButton.setOnAction(event -> toggleChartZoom(key));
+		}
+		if (chart != null) {
+			chartsByKey.put(key, chart);
+			chart.setAnimated(false);
+			chart.setCreateSymbols(false);
+			chart.setLegendVisible("cells".equals(key));
+			chart.setPrefHeight(260.0);
+			chart.setMinHeight(220.0);
+			if (chart.getXAxis() instanceof NumberAxis) {
+				NumberAxis axis = (NumberAxis) chart.getXAxis();
+				axis.setForceZeroInRange(false);
+				axis.setTickLabelFill(Color.web("#d7e2ef"));
+			}
+			if (chart.getYAxis() instanceof NumberAxis) {
+				NumberAxis axis = (NumberAxis) chart.getYAxis();
+				axis.setForceZeroInRange(false);
+				axis.setTickLabelFill(Color.web("#d7e2ef"));
+			}
+		}
+	}
+
+	private void toggleChartZoom(String key) {
+		if (key == null || key.isBlank()) {
 			return;
 		}
-		axisTelemetryX.setForceZeroInRange(false);
-		axisTelemetryX.setAutoRanging(true);
-		axisTelemetryY.setAutoRanging(true);
-		chartTelemetry.setTitle("Telemetry Trends");
+		if (key.equals(zoomedChartKey)) {
+			zoomedChartKey = null;
+		} else {
+			zoomedChartKey = key;
+		}
+		renderChartLayout();
+	}
+
+	private void renderChartLayout() {
+		if (statsChartsGrid == null) {
+			return;
+		}
+
+		statsChartsGrid.getChildren().clear();
+		for (String key : CHART_ORDER) {
+			setChartZoomState(key, false);
+		}
+
+		if (zoomedChartKey != null && chartCards.containsKey(zoomedChartKey)) {
+			VBox zoomed = chartCards.get(zoomedChartKey);
+			addCardToGrid(zoomed, 0, 0, 2);
+			setChartZoomState(zoomedChartKey, true);
+
+			int idx = 0;
+			for (String key : CHART_ORDER) {
+				if (key.equals(zoomedChartKey) || !chartCards.containsKey(key)) {
+					continue;
+				}
+				int row = 1 + (idx / 2);
+				int col = idx % 2;
+				addCardToGrid(chartCards.get(key), row, col, 1);
+				idx++;
+			}
+			Platform.runLater(this::applyChartStyling);
+			return;
+		}
+
+		int idx = 0;
+		for (String key : CHART_ORDER) {
+			if (!chartCards.containsKey(key)) {
+				continue;
+			}
+			int row = idx / 2;
+			int col = idx % 2;
+			int span = "cells".equals(key) ? 2 : 1;
+			if ("cells".equals(key) && col != 0) {
+				idx++;
+				row = idx / 2;
+				col = 0;
+			}
+			addCardToGrid(chartCards.get(key), row, col, span);
+			idx += span;
+		}
+		Platform.runLater(this::applyChartStyling);
+	}
+
+	private void addCardToGrid(VBox card, int row, int col, int colSpan) {
+		if (card == null) {
+			return;
+		}
+		GridPane.setRowIndex(card, row);
+		GridPane.setColumnIndex(card, col);
+		GridPane.setColumnSpan(card, colSpan);
+		GridPane.setHgrow(card, Priority.ALWAYS);
+		card.setMaxWidth(Double.MAX_VALUE);
+		statsChartsGrid.getChildren().add(card);
+	}
+
+	private void setChartZoomState(String key, boolean zoomed) {
+		Button button = chartZoomButtons.get(key);
+		if (button != null) {
+			button.setText(zoomed ? "Shrink" : "Enlarge");
+		}
+		VBox card = chartCards.get(key);
+		if (card != null) {
+			card.setPrefHeight(zoomed ? 640.0 : 320.0);
+		}
+		LineChart<Number, Number> chart = chartsByKey.get(key);
+		if (chart != null) {
+			chart.setPrefHeight(zoomed ? 540.0 : 260.0);
+			chart.setMinHeight(zoomed ? 520.0 : 220.0);
+		}
+	}
+
+	private void applyChartStyling() {
+		styleChart(chartVoltage, "#ff6a2a", true);
+		styleChart(chartCurrent, "#f7c453", true);
+		styleChart(chartSoc, "#38d889", true);
+		styleChart(chartStatus, "#ff8ea0", true);
+		styleChart(chartCells, "#67b6ff", false);
+	}
+
+	private void styleChart(LineChart<Number, Number> chart, String color, boolean hideLegend) {
+		if (chart == null) {
+			return;
+		}
+		chart.setLegendVisible(!hideLegend);
+
+		Node plotBackground = chart.lookup(".chart-plot-background");
+		if (plotBackground != null) {
+			plotBackground.setStyle("-fx-background-color: #162233;");
+		}
+
+		if (!hideLegend) {
+			for (Node line : chart.lookupAll(".chart-series-line")) {
+				int colorIndex = resolveSeriesColorIndex(line.getStyleClass());
+				String seriesColor = CELL_SERIES_COLORS[colorIndex % CELL_SERIES_COLORS.length];
+				line.setStyle("-fx-stroke: " + seriesColor + "; -fx-stroke-width: 2.4px;");
+			}
+			for (Node symbol : chart.lookupAll(".chart-line-symbol")) {
+				symbol.setStyle("-fx-background-color: transparent, transparent;");
+			}
+			for (Node legendSymbol : chart.lookupAll(".chart-legend-item-symbol")) {
+				int colorIndex = resolveSeriesColorIndex(legendSymbol.getStyleClass());
+				String seriesColor = CELL_SERIES_COLORS[colorIndex % CELL_SERIES_COLORS.length];
+				legendSymbol.setStyle("-fx-background-color: " + seriesColor + ", " + seriesColor + ";");
+			}
+			return;
+		}
+
+		for (Node line : chart.lookupAll(".chart-series-line")) {
+			line.setStyle("-fx-stroke: " + color + "; -fx-stroke-width: 2.8px;");
+		}
+	}
+
+	private int resolveSeriesColorIndex(List<String> styleClasses) {
+		if (styleClasses == null) {
+			return 0;
+		}
+		for (String styleClass : styleClasses) {
+			if (styleClass == null || !styleClass.startsWith("default-color")) {
+				continue;
+			}
+			String number = styleClass.substring("default-color".length());
+			if (isInteger(number)) {
+				int parsed = safeInt(number, 0);
+				return Math.max(parsed, 0);
+			}
+		}
+		return 0;
 	}
 
 	private void wireActions() {
@@ -237,6 +532,9 @@ public class FXMLController {
 		}
 		if (btnRefreshStats != null) {
 			btnRefreshStats.setOnAction(event -> triggerManualRefresh());
+		}
+		if (btnApplySetting != null) {
+			btnApplySetting.setOnAction(event -> submitSettingUpdate());
 		}
 	}
 
@@ -291,12 +589,14 @@ public class FXMLController {
 			List<HistoryPoint> history = parseHistory(httpGet("/api/history?moduleId=" + statsModule + "&sinceMinutes=" + sinceMinutes + "&limit=" + HISTORY_LIMIT));
 			List<EventRow> events = parseEvents(httpGet("/api/events?limit=40"));
 			RpiSnapshot rpi = parseRpiSnapshot(httpGet("/api/rpi-status"));
+			SettingsSnapshot settings = parseSettingsSnapshot(httpGet("/api/cell-settings"));
 
 			Platform.runLater(() -> {
 				applyLive(live, liveModule);
 				applyStats(stats, history, sinceMinutes);
 				tblEvents.setItems(FXCollections.observableArrayList(events));
 				applyRpi(rpi);
+				applySettings(settings);
 				lblConnection.setText("API OK | " + API_BASE + " | " + LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")));
 			});
 		} catch (Exception ex) {
@@ -305,6 +605,60 @@ public class FXMLController {
 		} finally {
 			refreshRunning = false;
 		}
+	}
+
+	private void submitSettingUpdate() {
+		if ("stdin".equals(INPUT_MODE)) {
+			setSettingsStatus("Settings update is unavailable in stdin mode.", false);
+			return;
+		}
+
+		String moduleValue = cmbSettingsModule == null ? null : cmbSettingsModule.getValue();
+		String settingDisplay = cmbSettingsKey == null ? null : cmbSettingsKey.getValue();
+		String numericValue = txtSettingsValue == null ? "" : txtSettingsValue.getText().trim();
+
+		int moduleId = safeInt(moduleValue, 0);
+		String settingKey = settingsDisplayToKey.get(settingDisplay);
+		if (moduleId < 1 || moduleId > 4) {
+			setSettingsStatus("Select module 1..4.", false);
+			return;
+		}
+		if (settingKey == null || settingKey.isBlank()) {
+			setSettingsStatus("No writable setting selected.", false);
+			return;
+		}
+		if (numericValue.isBlank()) {
+			setSettingsStatus("Value is required.", false);
+			return;
+		}
+		if (!isNumeric(numericValue)) {
+			setSettingsStatus("Value must be numeric.", false);
+			return;
+		}
+
+		setSettingsStatus("Saving setting...", true);
+		Thread thread = new Thread(() -> {
+			try {
+				String body = "moduleId=" + urlEncode(String.valueOf(moduleId))
+					+ "&key=" + urlEncode(settingKey)
+					+ "&value=" + urlEncode(numericValue);
+				httpPostForm("/api/cell-settings", body);
+				Platform.runLater(() -> setSettingsStatus("Setting updated.", true));
+				refreshFromApi();
+			} catch (Exception ex) {
+				Platform.runLater(() -> setSettingsStatus("Update failed: " + ex.getMessage(), false));
+			}
+		}, "gui-setting-update");
+		thread.setDaemon(true);
+		thread.start();
+	}
+
+	private void setSettingsStatus(String message, boolean ok) {
+		if (lblSettingsStatus == null) {
+			return;
+		}
+		lblSettingsStatus.setText(message);
+		lblSettingsStatus.setStyle(ok ? "-fx-text-fill: #29d391;" : "-fx-text-fill: #ff6b6b;");
 	}
 
 	private void parseAndUpdateLiveFromLine(String line) {
@@ -339,9 +693,9 @@ public class FXMLController {
 		int statusCode = safeInt(parts[baseIndex + 3], 0);
 		double socPercent = socRaw > 1000.0 ? socRaw / 1_000_000.0 : socRaw;
 
-		lblVoltage.setText(String.format("%.3f V", voltage));
-		lblCurrent.setText(String.format("%.3f A", current));
-		lblSoc.setText(String.format("%.2f %%", socPercent));
+		lblVoltage.setText(String.format(Locale.US, "%.3f V", voltage));
+		lblCurrent.setText(String.format(Locale.US, "%.3f A", current));
+		lblSoc.setText(String.format(Locale.US, "%.2f %%", socPercent));
 		lblStatus.setText(statusCode + " (" + describeStatusCode(statusCode) + ")");
 		lblLiveStatusLine.setText("Module " + moduleId + " | stdin | " + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
 	}
@@ -357,7 +711,7 @@ public class FXMLController {
 		if (cmbStatsRange == null || cmbStatsRange.getValue() == null) {
 			return 60;
 		}
-		String text = cmbStatsRange.getValue().trim().toLowerCase();
+		String text = cmbStatsRange.getValue().trim().toLowerCase(Locale.ROOT);
 		if (text.endsWith("h")) {
 			return safeInt(text.replace("h", "").trim(), 1) * 60;
 		}
@@ -367,8 +721,8 @@ public class FXMLController {
 	private String httpGet(String endpoint) throws IOException {
 		HttpURLConnection connection = (HttpURLConnection) new URL(API_BASE + endpoint).openConnection();
 		connection.setRequestMethod("GET");
-		connection.setConnectTimeout(1500);
-		connection.setReadTimeout(1500);
+		connection.setConnectTimeout(2000);
+		connection.setReadTimeout(2000);
 		try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
 			StringBuilder sb = new StringBuilder();
 			String line;
@@ -377,6 +731,46 @@ public class FXMLController {
 			}
 			return sb.toString();
 		} finally {
+			connection.disconnect();
+		}
+	}
+
+	private String httpPostForm(String endpoint, String body) throws IOException {
+		HttpURLConnection connection = (HttpURLConnection) new URL(API_BASE + endpoint).openConnection();
+		connection.setRequestMethod("POST");
+		connection.setConnectTimeout(2500);
+		connection.setReadTimeout(2500);
+		connection.setDoOutput(true);
+		connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+
+		byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+		try (OutputStream output = connection.getOutputStream()) {
+			output.write(bytes);
+		}
+
+		int status = connection.getResponseCode();
+		BufferedReader reader = null;
+		try {
+			if (status >= 200 && status < 300) {
+				reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8));
+			} else {
+				reader = new BufferedReader(new InputStreamReader(connection.getErrorStream(), StandardCharsets.UTF_8));
+			}
+			StringBuilder sb = new StringBuilder();
+			String line;
+			while (reader != null && (line = reader.readLine()) != null) {
+				sb.append(line);
+			}
+			String response = sb.toString();
+			if (status >= 200 && status < 300) {
+				return response;
+			}
+			String err = extractStringField(response, "error", "HTTP " + status);
+			throw new IOException(err);
+		} finally {
+			if (reader != null) {
+				reader.close();
+			}
 			connection.disconnect();
 		}
 	}
@@ -425,6 +819,7 @@ public class FXMLController {
 			point.current = extractNumberField(obj, "currentA", 0.0);
 			point.soc = extractNumberField(obj, "socPercent", 0.0);
 			point.statusCode = extractNumberField(obj, "statusCode", 0.0);
+			point.cells = extractNumberArrayField(obj, "cellsMv");
 			result.add(point);
 		}
 		Collections.reverse(result);
@@ -435,9 +830,10 @@ public class FXMLController {
 		List<String> objects = extractObjectsFromArray(json);
 		List<EventRow> rows = new ArrayList<>();
 		for (String obj : objects) {
+			int moduleId = (int) extractNumberField(obj, "moduleId", 0.0);
 			rows.add(new EventRow(
 				extractStringField(obj, "timestamp", "-"),
-				String.valueOf((int) extractNumberField(obj, "moduleId", 0.0)),
+				moduleId <= 0 ? "SYSTEM" : String.valueOf(moduleId),
 				extractStringField(obj, "severity", "-"),
 				String.valueOf((int) extractNumberField(obj, "eventCode", 0.0)),
 				extractStringField(obj, "message", "-")
@@ -473,14 +869,63 @@ public class FXMLController {
 		return snapshot;
 	}
 
+	private SettingsSnapshot parseSettingsSnapshot(String json) {
+		List<String> moduleObjects = extractObjectsFromArray(json);
+		Map<String, SettingAccumulator> byKey = new LinkedHashMap<>();
+
+		for (String moduleObj : moduleObjects) {
+			int moduleId = (int) extractNumberField(moduleObj, "moduleId", 0.0);
+			if (moduleId < 1 || moduleId > 4) {
+				continue;
+			}
+
+			List<String> settings = extractObjectsFromArray(extractArrayField(moduleObj, "settings"));
+			for (String settingObj : settings) {
+				String key = extractStringField(settingObj, "key", "");
+				if (key.isBlank()) {
+					continue;
+				}
+
+				SettingAccumulator acc = byKey.computeIfAbsent(key, ignored -> new SettingAccumulator());
+				acc.key = key;
+				acc.label = extractStringField(settingObj, "label", key);
+				acc.unit = extractStringField(settingObj, "unit", "");
+				acc.min = extractNumberField(settingObj, "min", 0.0);
+				acc.max = extractNumberField(settingObj, "max", 0.0);
+				acc.writable = extractBoolField(settingObj, "writable", false);
+				acc.values[moduleId] = extractNumberField(settingObj, "value", Double.NaN);
+			}
+		}
+
+		SettingsSnapshot snapshot = new SettingsSnapshot();
+		for (SettingAccumulator acc : byKey.values()) {
+			snapshot.rows.add(new SettingRow(
+				acc.label,
+				acc.unit,
+				formatDecimal(acc.min, 4),
+				formatDecimal(acc.max, 4),
+				formatSettingValue(acc.values[1]),
+				formatSettingValue(acc.values[2]),
+				formatSettingValue(acc.values[3]),
+				formatSettingValue(acc.values[4]),
+				acc.writable ? "YES" : "RO"
+			));
+
+			if (acc.writable) {
+				snapshot.writableOptions.add(new SettingOption(acc.key, acc.label + " (" + acc.unit + ")"));
+			}
+		}
+		return snapshot;
+	}
+
 	private void applyLive(LiveSnapshot snapshot, int moduleId) {
 		if (snapshot == null) {
 			lblLiveStatusLine.setText("Module " + moduleId + " | waiting for API data");
 			return;
 		}
-		lblVoltage.setText(String.format("%.3f V", snapshot.voltage));
-		lblCurrent.setText(String.format("%.3f A", snapshot.current));
-		lblSoc.setText(String.format("%.2f %%", snapshot.soc));
+		lblVoltage.setText(String.format(Locale.US, "%.3f V", snapshot.voltage));
+		lblCurrent.setText(String.format(Locale.US, "%.3f A", snapshot.current));
+		lblSoc.setText(String.format(Locale.US, "%.2f %%", snapshot.soc));
 		lblStatus.setText(snapshot.statusCode + " (" + describeStatusCode(snapshot.statusCode) + ")");
 		lblLiveStatusLine.setText("Module " + moduleId + " | ts=" + emptyToDash(snapshot.timestamp));
 	}
@@ -493,14 +938,14 @@ public class FXMLController {
 			lblStatCurrentRange.setText("-");
 			lblStatPoints.setText("0");
 			lblStatLastStatus.setText("-");
-			chartTelemetry.getData().clear();
+			clearAllCharts();
 			return;
 		}
 
-		lblStatAvgSoc.setText(String.format("%.2f %%", stats.avgSoc));
-		lblStatSocRange.setText(String.format("%.2f - %.2f %%", stats.minSoc, stats.maxSoc));
-		lblStatVoltageRange.setText(String.format("%.3f - %.3f V", stats.minVoltage, stats.maxVoltage));
-		lblStatCurrentRange.setText(String.format("%.3f - %.3f A", stats.minCurrent, stats.maxCurrent));
+		lblStatAvgSoc.setText(String.format(Locale.US, "%.2f %%", stats.avgSoc));
+		lblStatSocRange.setText(String.format(Locale.US, "%.2f - %.2f %%", stats.minSoc, stats.maxSoc));
+		lblStatVoltageRange.setText(String.format(Locale.US, "%.3f - %.3f V", stats.minVoltage, stats.maxVoltage));
+		lblStatCurrentRange.setText(String.format(Locale.US, "%.3f - %.3f A", stats.minCurrent, stats.maxCurrent));
 		lblStatPoints.setText(String.valueOf(stats.points));
 		lblStatLastStatus.setText(stats.lastStatusCode + " (" + describeStatusCode(stats.lastStatusCode) + ")");
 
@@ -516,14 +961,110 @@ public class FXMLController {
 		for (int i = 0; i < history.size(); i++) {
 			HistoryPoint point = history.get(i);
 			int x = i + 1;
-			voltageSeries.getData().add(new XYChart.Data<>(x, point.voltage));
+			voltageSeries.getData().add(new XYChart.Data<>(x, point.voltage / 10.0));
 			currentSeries.getData().add(new XYChart.Data<>(x, point.current));
 			socSeries.getData().add(new XYChart.Data<>(x, point.soc));
 			statusSeries.getData().add(new XYChart.Data<>(x, point.statusCode));
 		}
 
-		chartTelemetry.setTitle("Telemetry trends (last " + sinceMinutes + " min)");
-		chartTelemetry.getData().setAll(voltageSeries, currentSeries, socSeries, statusSeries);
+		if (chartVoltage != null) {
+			chartVoltage.setTitle("Voltage (last " + sinceMinutes + " min)");
+			chartVoltage.getData().setAll(voltageSeries);
+		}
+		if (chartCurrent != null) {
+			chartCurrent.setTitle("Current (last " + sinceMinutes + " min)");
+			chartCurrent.getData().setAll(currentSeries);
+		}
+		if (chartSoc != null) {
+			chartSoc.setTitle("SOC (last " + sinceMinutes + " min)");
+			chartSoc.getData().setAll(socSeries);
+		}
+		if (chartStatus != null) {
+			chartStatus.setTitle("Status (last " + sinceMinutes + " min)");
+			chartStatus.getData().setAll(statusSeries);
+		}
+		applyCellChart(history, sinceMinutes);
+		Platform.runLater(this::applyChartStyling);
+	}
+
+	private void clearAllCharts() {
+		for (LineChart<Number, Number> chart : chartsByKey.values()) {
+			if (chart != null) {
+				chart.getData().clear();
+			}
+		}
+	}
+
+	private void applyCellChart(List<HistoryPoint> history, int sinceMinutes) {
+		if (chartCells == null) {
+			return;
+		}
+
+		int maxCellCount = 0;
+		for (HistoryPoint point : history) {
+			maxCellCount = Math.max(maxCellCount, point.cells.size());
+		}
+		if (maxCellCount == 0) {
+			chartCells.setTitle("Cell Voltages (no cell data)");
+			chartCells.getData().clear();
+			return;
+		}
+
+		List<XYChart.Series<Number, Number>> seriesList = new ArrayList<>();
+		for (int cellIndex = 0; cellIndex < maxCellCount; cellIndex++) {
+			XYChart.Series<Number, Number> cellSeries = new XYChart.Series<>();
+			cellSeries.setName("Cell " + (cellIndex + 1));
+			boolean hasData = false;
+			for (int i = 0; i < history.size(); i++) {
+				HistoryPoint point = history.get(i);
+				if (cellIndex >= point.cells.size()) {
+					continue;
+				}
+				double value = point.cells.get(cellIndex);
+				if (!Double.isFinite(value)) {
+					continue;
+				}
+				hasData = true;
+				cellSeries.getData().add(new XYChart.Data<>(i + 1, value));
+			}
+			if (hasData) {
+				seriesList.add(cellSeries);
+			}
+		}
+
+		chartCells.setTitle("Cell Voltages (last " + sinceMinutes + " min)");
+		chartCells.getData().setAll(seriesList);
+	}
+
+	private void applySettings(SettingsSnapshot snapshot) {
+		if (snapshot == null) {
+			tblSettings.setItems(FXCollections.observableArrayList());
+			if (cmbSettingsKey != null) {
+				cmbSettingsKey.getItems().clear();
+			}
+			settingsDisplayToKey.clear();
+			return;
+		}
+
+		tblSettings.setItems(FXCollections.observableArrayList(snapshot.rows));
+
+		if (cmbSettingsKey == null) {
+			return;
+		}
+
+		String previous = cmbSettingsKey.getValue();
+		settingsDisplayToKey.clear();
+		List<String> displayValues = new ArrayList<>();
+		for (SettingOption option : snapshot.writableOptions) {
+			displayValues.add(option.display);
+			settingsDisplayToKey.put(option.display, option.key);
+		}
+		cmbSettingsKey.getItems().setAll(displayValues);
+		if (previous != null && settingsDisplayToKey.containsKey(previous)) {
+			cmbSettingsKey.setValue(previous);
+		} else if (!displayValues.isEmpty()) {
+			cmbSettingsKey.setValue(displayValues.get(0));
+		}
 	}
 
 	private void applyRpi(RpiSnapshot snapshot) {
@@ -589,6 +1130,28 @@ public class FXMLController {
 			}
 		}
 		return result;
+	}
+
+	private static List<Double> extractNumberArrayField(String objectJson, String key) {
+		String array = extractArrayField(objectJson, key);
+		if (array.length() < 2) {
+			return Collections.emptyList();
+		}
+		String body = array.substring(1, array.length() - 1).trim();
+		if (body.isEmpty()) {
+			return Collections.emptyList();
+		}
+
+		String[] parts = body.split(",");
+		List<Double> values = new ArrayList<>();
+		for (String part : parts) {
+			String trimmed = part.trim();
+			if (trimmed.isEmpty()) {
+				continue;
+			}
+			values.add(safeDouble(trimmed, Double.NaN));
+		}
+		return values;
 	}
 
 	private static int findMatchingBracket(String text, int startIndex, char open, char close) {
@@ -699,6 +1262,18 @@ public class FXMLController {
 		}
 	}
 
+	private static boolean isNumeric(String value) {
+		if (value == null || value.trim().isEmpty()) {
+			return false;
+		}
+		try {
+			Double.parseDouble(value.trim());
+			return true;
+		} catch (NumberFormatException ex) {
+			return false;
+		}
+	}
+
 	private static int safeInt(String value, int fallback) {
 		if (value == null) {
 			return fallback;
@@ -719,6 +1294,24 @@ public class FXMLController {
 		} catch (NumberFormatException ex) {
 			return fallback;
 		}
+	}
+
+	private static String formatDecimal(double value, int precision) {
+		if (!Double.isFinite(value)) {
+			return "-";
+		}
+		return String.format(Locale.US, "%." + precision + "f", value);
+	}
+
+	private static String formatSettingValue(double value) {
+		if (!Double.isFinite(value)) {
+			return "-";
+		}
+		return String.format(Locale.US, "%.3f", value);
+	}
+
+	private static String urlEncode(String value) {
+		return URLEncoder.encode(value, StandardCharsets.UTF_8);
 	}
 
 	private static final class LiveSnapshot {
@@ -747,6 +1340,7 @@ public class FXMLController {
 		double current;
 		double soc;
 		double statusCode;
+		List<Double> cells = Collections.emptyList();
 	}
 
 	private static final class RpiSnapshot {
@@ -754,6 +1348,31 @@ public class FXMLController {
 		int offlineThreshold;
 		final List<SourceRow> sources = new ArrayList<>();
 		final List<ModuleRow> modules = new ArrayList<>();
+	}
+
+	private static final class SettingsSnapshot {
+		final List<SettingRow> rows = new ArrayList<>();
+		final List<SettingOption> writableOptions = new ArrayList<>();
+	}
+
+	private static final class SettingOption {
+		final String key;
+		final String display;
+
+		SettingOption(String key, String display) {
+			this.key = key;
+			this.display = display;
+		}
+	}
+
+	private static final class SettingAccumulator {
+		String key;
+		String label;
+		String unit;
+		double min;
+		double max;
+		boolean writable;
+		final double[] values = new double[] {Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN};
 	}
 
 	public static final class EventRow {
@@ -820,5 +1439,39 @@ public class FXMLController {
 		public SimpleStringProperty lastSeenProperty() { return lastSeen; }
 		public SimpleStringProperty secondsProperty() { return seconds; }
 		public SimpleStringProperty onlineProperty() { return online; }
+	}
+
+	public static final class SettingRow {
+		private final SimpleStringProperty label;
+		private final SimpleStringProperty unit;
+		private final SimpleStringProperty min;
+		private final SimpleStringProperty max;
+		private final SimpleStringProperty module1;
+		private final SimpleStringProperty module2;
+		private final SimpleStringProperty module3;
+		private final SimpleStringProperty module4;
+		private final SimpleStringProperty writable;
+
+		SettingRow(String label, String unit, String min, String max, String module1, String module2, String module3, String module4, String writable) {
+			this.label = new SimpleStringProperty(label);
+			this.unit = new SimpleStringProperty(unit);
+			this.min = new SimpleStringProperty(min);
+			this.max = new SimpleStringProperty(max);
+			this.module1 = new SimpleStringProperty(module1);
+			this.module2 = new SimpleStringProperty(module2);
+			this.module3 = new SimpleStringProperty(module3);
+			this.module4 = new SimpleStringProperty(module4);
+			this.writable = new SimpleStringProperty(writable);
+		}
+
+		public SimpleStringProperty labelProperty() { return label; }
+		public SimpleStringProperty unitProperty() { return unit; }
+		public SimpleStringProperty minProperty() { return min; }
+		public SimpleStringProperty maxProperty() { return max; }
+		public SimpleStringProperty module1Property() { return module1; }
+		public SimpleStringProperty module2Property() { return module2; }
+		public SimpleStringProperty module3Property() { return module3; }
+		public SimpleStringProperty module4Property() { return module4; }
+		public SimpleStringProperty writableProperty() { return writable; }
 	}
 }

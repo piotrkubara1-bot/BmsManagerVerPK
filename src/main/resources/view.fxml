@@ -8,13 +8,14 @@
 <?import javafx.scene.control.TabPane?>
 <?import javafx.scene.control.TableColumn?>
 <?import javafx.scene.control.TableView?>
+<?import javafx.scene.control.TextField?>
 <?import javafx.scene.layout.BorderPane?>
 <?import javafx.scene.layout.GridPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
 <?import javafx.scene.text.Font?>
 
-<BorderPane prefHeight="780.0" prefWidth="1200.0"
+<BorderPane prefHeight="980.0" prefWidth="1480.0"
 			style="-fx-background-color: #1f2a37;"
 			xmlns="http://javafx.com/javafx/8"
 			xmlns:fx="http://javafx.com/fxml/1"
@@ -101,13 +102,13 @@
 						<VBox spacing="10.0" style="-fx-padding: 14;">
 							<children>
 								<Button fx:id="btnRefreshEvents" text="Refresh Events"/>
-								<TableView fx:id="tblEvents" prefHeight="520.0">
+								<TableView fx:id="tblEvents" prefHeight="560.0">
 									<columns>
 										<TableColumn fx:id="colEventTime" text="Timestamp" prefWidth="200.0"/>
 										<TableColumn fx:id="colEventModule" text="Module" prefWidth="80.0"/>
 										<TableColumn fx:id="colEventSeverity" text="Severity" prefWidth="110.0"/>
 										<TableColumn fx:id="colEventCode" text="Code" prefWidth="90.0"/>
-										<TableColumn fx:id="colEventMessage" text="Message" prefWidth="660.0"/>
+										<TableColumn fx:id="colEventMessage" text="Message" prefWidth="760.0"/>
 									</columns>
 								</TableView>
 							</children>
@@ -151,14 +152,139 @@
 									</children>
 								</GridPane>
 
-								<LineChart fx:id="chartTelemetry" animated="false" createSymbols="false" prefHeight="420.0">
-									<xAxis>
-										<NumberAxis fx:id="axisTelemetryX" label="Samples (chronological index)"/>
-									</xAxis>
-									<yAxis>
-										<NumberAxis fx:id="axisTelemetryY" label="Value"/>
-									</yAxis>
-								</LineChart>
+								<GridPane fx:id="statsChartsGrid" hgap="12.0" vgap="12.0" VBox.vgrow="ALWAYS">
+									<children>
+										<VBox fx:id="chartCardVoltage" spacing="8.0" style="-fx-background-color: #2c3b4d; -fx-padding: 10; -fx-background-radius: 8;" GridPane.columnIndex="0" GridPane.rowIndex="0">
+											<children>
+												<HBox spacing="8.0" alignment="CENTER_LEFT">
+													<children>
+														<Label text="Voltage (V)" textFill="#d7e2ef"/>
+														<Button fx:id="btnZoomVoltage" text="Enlarge"/>
+													</children>
+												</HBox>
+												<LineChart fx:id="chartVoltage" prefHeight="260.0" animated="false" createSymbols="false" VBox.vgrow="ALWAYS">
+													<xAxis>
+														<NumberAxis label="Samples"/>
+													</xAxis>
+													<yAxis>
+														<NumberAxis label="Value"/>
+													</yAxis>
+												</LineChart>
+											</children>
+										</VBox>
+
+										<VBox fx:id="chartCardCurrent" spacing="8.0" style="-fx-background-color: #2c3b4d; -fx-padding: 10; -fx-background-radius: 8;" GridPane.columnIndex="1" GridPane.rowIndex="0">
+											<children>
+												<HBox spacing="8.0" alignment="CENTER_LEFT">
+													<children>
+														<Label text="Current (A)" textFill="#d7e2ef"/>
+														<Button fx:id="btnZoomCurrent" text="Enlarge"/>
+													</children>
+												</HBox>
+												<LineChart fx:id="chartCurrent" prefHeight="260.0" animated="false" createSymbols="false" VBox.vgrow="ALWAYS">
+													<xAxis>
+														<NumberAxis label="Samples"/>
+													</xAxis>
+													<yAxis>
+														<NumberAxis label="Value"/>
+													</yAxis>
+												</LineChart>
+											</children>
+										</VBox>
+
+										<VBox fx:id="chartCardSoc" spacing="8.0" style="-fx-background-color: #2c3b4d; -fx-padding: 10; -fx-background-radius: 8;" GridPane.columnIndex="0" GridPane.rowIndex="1">
+											<children>
+												<HBox spacing="8.0" alignment="CENTER_LEFT">
+													<children>
+														<Label text="SOC (%)" textFill="#d7e2ef"/>
+														<Button fx:id="btnZoomSoc" text="Enlarge"/>
+													</children>
+												</HBox>
+												<LineChart fx:id="chartSoc" prefHeight="260.0" animated="false" createSymbols="false" VBox.vgrow="ALWAYS">
+													<xAxis>
+														<NumberAxis label="Samples"/>
+													</xAxis>
+													<yAxis>
+														<NumberAxis label="Value"/>
+													</yAxis>
+												</LineChart>
+											</children>
+										</VBox>
+
+										<VBox fx:id="chartCardStatus" spacing="8.0" style="-fx-background-color: #2c3b4d; -fx-padding: 10; -fx-background-radius: 8;" GridPane.columnIndex="1" GridPane.rowIndex="1">
+											<children>
+												<HBox spacing="8.0" alignment="CENTER_LEFT">
+													<children>
+														<Label text="Status" textFill="#d7e2ef"/>
+														<Button fx:id="btnZoomStatus" text="Enlarge"/>
+													</children>
+												</HBox>
+												<LineChart fx:id="chartStatus" prefHeight="260.0" animated="false" createSymbols="false" VBox.vgrow="ALWAYS">
+													<xAxis>
+														<NumberAxis label="Samples"/>
+													</xAxis>
+													<yAxis>
+														<NumberAxis label="Value"/>
+													</yAxis>
+												</LineChart>
+											</children>
+										</VBox>
+
+										<VBox fx:id="chartCardCells" spacing="8.0" style="-fx-background-color: #2c3b4d; -fx-padding: 10; -fx-background-radius: 8;" GridPane.columnIndex="0" GridPane.rowIndex="2" GridPane.columnSpan="2">
+											<children>
+												<HBox spacing="8.0" alignment="CENTER_LEFT">
+													<children>
+														<Label text="Cell Voltages (mV)" textFill="#d7e2ef"/>
+														<Button fx:id="btnZoomCells" text="Enlarge"/>
+													</children>
+												</HBox>
+												<LineChart fx:id="chartCells" prefHeight="260.0" animated="false" createSymbols="false" VBox.vgrow="ALWAYS">
+													<xAxis>
+														<NumberAxis label="Samples"/>
+													</xAxis>
+													<yAxis>
+														<NumberAxis label="mV"/>
+													</yAxis>
+												</LineChart>
+											</children>
+										</VBox>
+									</children>
+								</GridPane>
+							</children>
+						</VBox>
+					</content>
+				</Tab>
+
+				<Tab text="Cell Settings">
+					<content>
+						<VBox spacing="10.0" style="-fx-padding: 14;">
+							<children>
+								<HBox spacing="8.0" alignment="CENTER_LEFT">
+									<children>
+										<Label text="Module" textFill="#d7e2ef"/>
+										<ComboBox fx:id="cmbSettingsModule" prefWidth="120.0"/>
+										<Label text="Setting" textFill="#d7e2ef"/>
+										<ComboBox fx:id="cmbSettingsKey" prefWidth="320.0"/>
+										<Label text="Value" textFill="#d7e2ef"/>
+										<TextField fx:id="txtSettingsValue" prefWidth="140.0" promptText="numeric value"/>
+										<Button fx:id="btnApplySetting" text="Apply"/>
+										<Label fx:id="lblSettingsStatus" text="" textFill="#d7e2ef"/>
+									</children>
+								</HBox>
+
+								<TableView fx:id="tblSettings" prefHeight="560.0">
+									<columns>
+										<TableColumn fx:id="colSettingLabel" text="Setting" prefWidth="260.0"/>
+										<TableColumn fx:id="colSettingUnit" text="Unit" prefWidth="70.0"/>
+										<TableColumn fx:id="colSettingMin" text="Min" prefWidth="90.0"/>
+										<TableColumn fx:id="colSettingMax" text="Max" prefWidth="90.0"/>
+										<TableColumn fx:id="colSettingM1" text="M1" prefWidth="90.0"/>
+										<TableColumn fx:id="colSettingM2" text="M2" prefWidth="90.0"/>
+										<TableColumn fx:id="colSettingM3" text="M3" prefWidth="90.0"/>
+										<TableColumn fx:id="colSettingM4" text="M4" prefWidth="90.0"/>
+										<TableColumn fx:id="colSettingWritable" text="Writable" prefWidth="90.0"/>
+									</columns>
+								</TableView>
 							</children>
 						</VBox>
 					</content>

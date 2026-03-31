@@ -36,25 +36,33 @@ public class BmsApiServer {
 	private static final int DEFAULT_PORT = 8090;
 	private static final int MAX_HISTORY = 5000;
 	private static final int MAX_EVENTS = 2000;
+	private static final int EVENT_DB_DISCONNECTED = 9001;
+	private static final int EVENT_RPI_DISCONNECTED = 9002;
+	private static final int EVENT_BMS_DISCONNECTED = 9003;
 
 	private static final Object LOCK = new Object();
 	private static final Map<Integer, BmsReading> latestByModule = new ConcurrentHashMap<>();
 	private static final Deque<BmsReading> history = new ArrayDeque<>();
 	private static final Deque<BmsEvent> events = new ArrayDeque<>();
 	private static final Set<Integer> allowedModules = new HashSet<>();
+	private static final Set<Integer> modulesSeen = ConcurrentHashMap.newKeySet();
 	private static final Map<Integer, Map<String, Double>> cellSettingsByModule = new ConcurrentHashMap<>();
 	private static final Map<String, IngestSourceState> ingestSources = new ConcurrentHashMap<>();
 
 	private static final SettingDefinition[] SETTING_DEFINITIONS = new SettingDefinition[] {
-		new SettingDefinition("fully_charged_voltage_v", "Fully Charged Voltage", "V", 3.0, 4.5, 4.2, true),
-		new SettingDefinition("charge_finished_current_a", "Charge Finished Current", "A", 0.1, 20.0, 2.0, true),
-		new SettingDefinition("early_balancing_threshold_v", "Early Balancing Threshold", "V", 3.0, 4.5, 3.7, true),
-		new SettingDefinition("allowed_disbalance_mv", "Allowed Disbalance", "mV", 1.0, 500.0, 30.0, true),
+		new SettingDefinition("fully_charged_voltage_v", "Fully Charged Voltage", "V", 3.4, 4.25, 4.2, true),
+		new SettingDefinition("overvoltage_protection_v", "Overvoltage Protection", "V", 3.65, 4.35, 4.25, true),
+		new SettingDefinition("undervoltage_protection_v", "Undervoltage Protection", "V", 2.50, 3.10, 2.80, true),
+		new SettingDefinition("charge_overcurrent_a", "Max Charge Current", "A", 1.0, 60.0, 30.0, true),
+		new SettingDefinition("discharge_overcurrent_a", "Max Discharge Current", "A", 1.0, 150.0, 80.0, true),
+		new SettingDefinition("early_balancing_threshold_v", "Balancing Start Voltage", "V", 3.30, 4.10, 3.70, true),
+		new SettingDefinition("discharge_temperature_high_c", "Overtemperature Cutoff", "C", 45.0, 75.0, 60.0, true),
 		new SettingDefinition("series_cells", "Number of Series Cells", "count", 1.0, 32.0, 16.0, false)
 	};
 
 	private static volatile Connection dbConnection;
 	private static volatile ScheduledExecutorService retentionExecutor;
+	private static volatile boolean dbWasConnected;
 
 	public static void main(String[] args) throws IOException {
 		int port = parseIntEnv("BMS_API_PORT", DEFAULT_PORT);
@@ -154,6 +162,7 @@ public class BmsApiServer {
 					")"
 				);
 			}
+			dbWasConnected = true;
 			System.out.println("[BmsApiServer] Database initialized.");
 		} catch (Exception ex) {
 			dbConnection = null;
@@ -307,6 +316,7 @@ public class BmsApiServer {
 			if (!allowedModules.isEmpty() && !allowedModules.contains(reading.moduleId)) {
 				return IngestResult.rejected();
 			}
+			modulesSeen.add(reading.moduleId);
 
 			synchronized (LOCK) {
 				latestByModule.put(reading.moduleId, reading);
@@ -952,13 +962,18 @@ public class BmsApiServer {
 			}
 
 			List<BmsEvent> snapshot = new ArrayList<>();
+			snapshot.addAll(buildSystemEvents());
 			synchronized (LOCK) {
 				for (BmsEvent item : events) {
-					snapshot.add(item);
 					if (snapshot.size() >= limit) {
 						break;
 					}
+					snapshot.add(item);
 				}
+			}
+
+			if (snapshot.size() > limit) {
+				snapshot = snapshot.subList(0, limit);
 			}
 
 			StringBuilder sb = new StringBuilder();
@@ -971,6 +986,106 @@ public class BmsApiServer {
 			}
 			sb.append(']');
 			writeJson(exchange, 200, sb.toString());
+		}
+	}
+
+	private static List<BmsEvent> buildSystemEvents() {
+		List<BmsEvent> result = new ArrayList<>();
+		int rpiOfflineThresholdSec = parseIntEnv("BMS_RPI_OFFLINE_SECONDS", 30);
+		if (rpiOfflineThresholdSec < 1) {
+			rpiOfflineThresholdSec = 30;
+		}
+
+		if (dbWasConnected && !isDbConnectionAlive()) {
+			result.add(systemEvent(0, EVENT_DB_DISCONNECTED, "ERROR", "Database connection lost"));
+		}
+
+		if (!ingestSources.isEmpty()) {
+			boolean anySourceOnline = false;
+			for (IngestSourceState state : ingestSources.values()) {
+				if (state == null || state.lastSeen == null) {
+					continue;
+				}
+				if (secondsSince(state.lastSeen) <= rpiOfflineThresholdSec) {
+					anySourceOnline = true;
+					break;
+				}
+			}
+			if (!anySourceOnline) {
+				result.add(systemEvent(0, EVENT_RPI_DISCONNECTED, "ERROR", "RPi connection lost"));
+			}
+		}
+
+		int bmsOfflineThresholdSec = parseIntEnv("BMS_BMS_OFFLINE_SECONDS", rpiOfflineThresholdSec);
+		if (bmsOfflineThresholdSec < 1) {
+			bmsOfflineThresholdSec = rpiOfflineThresholdSec;
+		}
+
+		List<Integer> trackedModules = new ArrayList<>();
+		if (!allowedModules.isEmpty()) {
+			trackedModules.addAll(allowedModules);
+		} else {
+			trackedModules.addAll(modulesSeen);
+		}
+		Collections.sort(trackedModules);
+
+		int offlineCount = 0;
+		for (Integer moduleId : trackedModules) {
+			if (moduleId == null || moduleId < 1 || moduleId > 4) {
+				continue;
+			}
+			BmsReading latest = latestByModule.get(moduleId);
+			if (latest == null) {
+				offlineCount++;
+				result.add(systemEvent(moduleId, EVENT_BMS_DISCONNECTED + moduleId, "WARN", "BMS module " + moduleId + " telemetry lost"));
+				continue;
+			}
+
+			Instant ts = parseInstantSafe(latest.timestamp);
+			if (ts == null || secondsSince(ts) > bmsOfflineThresholdSec) {
+				offlineCount++;
+				result.add(systemEvent(moduleId, EVENT_BMS_DISCONNECTED + moduleId, "WARN", "BMS module " + moduleId + " telemetry lost"));
+			}
+		}
+
+		if (!trackedModules.isEmpty() && offlineCount == trackedModules.size()) {
+			result.add(systemEvent(0, EVENT_BMS_DISCONNECTED, "ERROR", "BMS connection lost (all tracked modules offline)"));
+		}
+
+		return result;
+	}
+
+	private static Instant parseInstantSafe(String input) {
+		if (input == null || input.trim().isEmpty()) {
+			return null;
+		}
+		try {
+			return Instant.parse(input.trim());
+		} catch (Exception ex) {
+			return null;
+		}
+	}
+
+	private static BmsEvent systemEvent(int moduleId, int eventCode, String severity, String message) {
+		BmsEvent event = new BmsEvent();
+		event.timestamp = Instant.now().toString();
+		event.moduleId = moduleId;
+		event.eventCode = eventCode;
+		event.severity = severity;
+		event.message = message;
+		event.rawLine = "SYSTEM," + eventCode + "," + severity + "," + message;
+		return event;
+	}
+
+	private static boolean isDbConnectionAlive() {
+		Connection connection = dbConnection;
+		if (connection == null) {
+			return false;
+		}
+		try {
+			return connection.isValid(1);
+		} catch (Exception ex) {
+			return false;
 		}
 	}
 
