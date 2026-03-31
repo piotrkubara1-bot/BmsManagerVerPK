@@ -260,7 +260,7 @@ function renderStatisticsCharts(history, moduleId) {
 	const zoomedKey = statsState.zoomedChartKey;
 
 	const ordered = [...history].reverse();
-	const voltage = ordered.map((item) => Number(item.voltageV));
+	const voltage = ordered.map((item) => Number(item.voltageV/10));
 	const current = ordered.map((item) => Number(item.currentA));
 	const soc = ordered.map((item) => Number(item.socPercent));
 	const status = ordered.map((item) => Number(item.statusCode));

@@ -44,7 +44,12 @@ Set at least:
 - `HOST_API_URL` (PC host IP + port 8090)
 - `SERIAL_PORT` (for example `/dev/ttyUSB0`)
 - `SERIAL_BAUD`
+- `TINYBMS_ACTIVE_POLL` (`true` for TinyBMS S516 binary protocol polling)
+- `TINYBMS_POLL_INTERVAL_SEC` (delay between full read cycles)
+- `TINYBMS_COMMAND_TIMEOUT_SEC` (timeout for each TinyBMS command)
 - `DEFAULT_MODULE_ID` (used when module id is missing in incoming lines)
+- `FORCE_DEFAULT_MODULE_ID` (`true` maps all incoming BMS/EVENT lines to `DEFAULT_MODULE_ID`; useful for single-pack capture)
+- `LOG_UNKNOWN_EVERY_N` (logs every Nth ignored UART line to help diagnose unexpected serial format; set `0` to disable)
 - `HEARTBEAT_INTERVAL_SEC` (seconds between keep-alive `HEARTBEAT` lines; set `0` to disable)
 
 ## 3. Run Manually
@@ -87,6 +92,11 @@ journalctl -u bms-uart-sender -f
 
 ## 5. Ingest Line Compatibility
 
+For TinyBMS S516, sender now supports active polling mode (`TINYBMS_ACTIVE_POLL=true`) and emits normalized
+`BMS,module,voltage,current,soc,status,cells...` lines directly to host ingest.
+
+When active poll is enabled, raw UART text framing is not required.
+
 The sender forwards only lines starting with:
 
 - `BMS,`
@@ -94,6 +104,14 @@ The sender forwards only lines starting with:
 - `HEARTBEAT` (generated periodically by sender for source liveness)
 
 If module id is missing, sender injects `DEFAULT_MODULE_ID` as the second field.
+
+If your UART source is single-pack and module id detection is ambiguous, set:
+
+- `FORCE_DEFAULT_MODULE_ID=true`
+
+This prevents lines from being interpreted as module `2/3/4` and rejected by host-side `BMS_ALLOWED_MODULES`.
+
+The sender also logs a warning when `/api/ingest` reports `rejected > 0` (even with HTTP 200), so malformed lines are visible in logs.
 
 Examples accepted by host:
 

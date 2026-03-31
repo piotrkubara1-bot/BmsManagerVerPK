@@ -1380,7 +1380,7 @@ public class BmsApiServer {
 			return explicit;
 		}
 
-		String host = env("DB_HOST", "localhost");
+		String host = env("DB_HOST", "127.0.0.1");
 		String port = env("DB_PORT", "3306");
 		String dbName = env("DB_NAME", "bms");
 		return "jdbc:mysql://" + host + ":" + port + "/" + dbName + "?useSSL=false&allowPublicKeyRetrieval=true";

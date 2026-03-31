@@ -26,7 +26,7 @@ nohup ./run_service.sh "${MODE}" >/tmp/bms_service_fullstack.log 2>&1 &
 sleep 2
 
 echo "[FullStack] Starting Web UI on port ${WEB_UI_PORT}"
-nohup WEB_UI_PORT="${WEB_UI_PORT}" ./run_web_ui.sh >/tmp/bms_webui_fullstack.log 2>&1 &
+nohup env WEB_UI_PORT="${WEB_UI_PORT}" ./run_web_ui.sh >/tmp/bms_webui_fullstack.log 2>&1 &
 
 echo "[FullStack] GUI is not started here. Run ./build_and_run_gui.sh separately."
 echo "[FullStack] Service: http://127.0.0.1:${BMS_API_PORT}/api/health"
