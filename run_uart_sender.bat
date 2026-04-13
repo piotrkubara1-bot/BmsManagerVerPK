@@ -3,7 +3,17 @@ setlocal EnableDelayedExpansion
 
 call "%~dp0load_env.bat" >nul 2>nul
 
-set "PORT_ARG=%~1"
+set "PORT_ARG="
+set "NO_PAUSE=0"
+if not "%~1"=="" (
+    if /I "%~1"=="--no-pause" (
+        set "NO_PAUSE=1"
+        set "PORT_ARG=%~2"
+    ) else (
+        set "PORT_ARG=%~1"
+        if /I "%~2"=="--no-pause" set "NO_PAUSE=1"
+    )
+)
 set "JAVA_ARGS="
 if not "%PORT_ARG%"=="" (
     if /I "%PORT_ARG:~0,7%"=="--port=" (
@@ -51,4 +61,4 @@ if "%JAVA_ARGS%"=="" (
     echo Konfiguracja: PORT override=!JAVA_ARGS!, URL=!BMS_API_INGEST_URL!
 )
 "%JAVA_EXE%" -cp "bin;lib/*" BmsUartSender %JAVA_ARGS%
-pause
+if not "%NO_PAUSE%"=="1" pause

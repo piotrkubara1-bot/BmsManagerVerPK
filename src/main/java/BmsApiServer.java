@@ -3,12 +3,16 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -39,6 +43,7 @@ public class BmsApiServer {
 	private static final int EVENT_DB_DISCONNECTED = 9001;
 	private static final int EVENT_RPI_DISCONNECTED = 9002;
 	private static final int EVENT_BMS_DISCONNECTED = 9003;
+	private static final int MAX_UART_LOG_LINES = 60;
 
 	private static final Object LOCK = new Object();
 	private static final Map<Integer, BmsReading> latestByModule = new ConcurrentHashMap<>();
@@ -48,6 +53,7 @@ public class BmsApiServer {
 	private static final Set<Integer> modulesSeen = ConcurrentHashMap.newKeySet();
 	private static final Map<Integer, Map<String, Double>> cellSettingsByModule = new ConcurrentHashMap<>();
 	private static final Map<String, IngestSourceState> ingestSources = new ConcurrentHashMap<>();
+	private static final Deque<String> uartLogs = new ArrayDeque<>();
 
 	private static final SettingDefinition[] SETTING_DEFINITIONS = new SettingDefinition[] {
 		new SettingDefinition("fully_charged_voltage_v", "Fully Charged Voltage", "V", 3.4, 4.25, 4.2, true),
@@ -63,6 +69,9 @@ public class BmsApiServer {
 	private static volatile Connection dbConnection;
 	private static volatile ScheduledExecutorService retentionExecutor;
 	private static volatile boolean dbWasConnected;
+	private static volatile Process uartProcess;
+	private static volatile String uartProcessPort = "";
+	private static volatile Instant uartStartedAt;
 
 	public static void main(String[] args) throws IOException {
 		int port = parseIntEnv("BMS_API_PORT", DEFAULT_PORT);
@@ -84,6 +93,9 @@ public class BmsApiServer {
 		server.createContext("/api/statistics", new StatisticsHandler());
 		server.createContext("/api/rpi-status", new RpiStatusHandler());
 		server.createContext("/api/cell-settings", new CellSettingsHandler());
+		server.createContext("/api/runtime-config", new RuntimeConfigHandler());
+		server.createContext("/api/uart-control", new UartControlHandler());
+		server.createContext("/api/bms-control", new BmsControlHandler());
 		server.setExecutor(null);
 
 		System.out.println("[BmsApiServer] Listening on port " + port);
@@ -93,7 +105,10 @@ public class BmsApiServer {
 		if (!allowedModules.isEmpty()) {
 			System.out.println("[BmsApiServer] Allowed modules: " + allowedModules);
 		}
-		Runtime.getRuntime().addShutdownHook(new Thread(BmsApiServer::shutdownRetentionTask));
+		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+			stopUartProcess();
+			shutdownRetentionTask();
+		}));
 		server.start();
 	}
 
@@ -1411,6 +1426,150 @@ public class BmsApiServer {
 		}
 	}
 
+	private static class RuntimeConfigHandler implements HttpHandler {
+		@Override
+		public void handle(HttpExchange exchange) throws IOException {
+			if (handleCorsAndPreflight(exchange)) {
+				return;
+			}
+
+			if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+				handleGet(exchange);
+				return;
+			}
+			if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+				handlePost(exchange);
+				return;
+			}
+
+			writeJson(exchange, 405, "{\"error\":\"Method not allowed\"}");
+		}
+
+		private void handleGet(HttpExchange exchange) throws IOException {
+			Path envPath = resolveEnvPath();
+			String serialPort = readConfigValue("SERIAL_PORT", firstNonBlank(System.getenv("SERIAL_PORT"), "COM5"));
+			String apiIngest = readConfigValue("BMS_API_INGEST_URL", firstNonBlank(System.getenv("BMS_API_INGEST_URL"), "http://127.0.0.1:8090/api/ingest"));
+			List<String> availablePorts = listAvailableSerialPorts();
+
+			String json = "{\"serialPort\":\"" + escapeJson(serialPort) + "\"" +
+				",\"ingestUrl\":\"" + escapeJson(apiIngest) + "\"" +
+				",\"envPath\":\"" + escapeJson(envPath.toAbsolutePath().toString()) + "\"" +
+				",\"envExists\":" + Files.exists(envPath) +
+				",\"bmsConnected\":" + !modulesSeen.isEmpty() +
+				",\"availablePorts\":" + stringListToJson(availablePorts) + "}";
+			writeJson(exchange, 200, json);
+		}
+
+		private void handlePost(HttpExchange exchange) throws IOException {
+			String body = readBody(exchange.getRequestBody());
+			Map<String, String> params = parseQuery(body);
+			String serialPort = firstNonBlank(params.get("serialPort"), params.get("port"), "");
+			if (serialPort.isEmpty()) {
+				writeJson(exchange, 400, "{\"error\":\"serialPort is required\"}");
+				return;
+			}
+
+			String normalizedPort = serialPort.trim().toUpperCase(Locale.ROOT);
+			if (!isSupportedSerialPort(normalizedPort)) {
+				writeJson(exchange, 400, "{\"error\":\"serialPort must look like COM3, COM5 or SIMULATED\"}");
+				return;
+			}
+
+			writeConfigValue("SERIAL_PORT", normalizedPort);
+			writeJson(
+				exchange,
+				200,
+				"{\"ok\":true,\"serialPort\":\"" + escapeJson(normalizedPort) + "\",\"message\":\"SERIAL_PORT saved to .env. Restart UART sender to use the new port.\"}"
+			);
+		}
+	}
+
+	private static class UartControlHandler implements HttpHandler {
+		@Override
+		public void handle(HttpExchange exchange) throws IOException {
+			if (handleCorsAndPreflight(exchange)) {
+				return;
+			}
+
+			if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+				writeJson(exchange, 200, uartStatusJson("ok"));
+				return;
+			}
+			if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+				writeJson(exchange, 405, "{\"error\":\"Method not allowed\"}");
+				return;
+			}
+
+			Map<String, String> params = parseQuery(readBody(exchange.getRequestBody()));
+			String action = firstNonBlank(params.get("action"), "").toLowerCase(Locale.ROOT);
+			if ("start".equals(action)) {
+				String requestedPort = firstNonBlank(params.get("serialPort"), params.get("port"), readConfigValue("SERIAL_PORT", "COM5"));
+				startUartProcess(requestedPort);
+				writeJson(exchange, 200, uartStatusJson("started"));
+				return;
+			}
+			if ("stop".equals(action)) {
+				stopUartProcess();
+				writeJson(exchange, 200, uartStatusJson("stopped"));
+				return;
+			}
+
+			writeJson(exchange, 400, "{\"error\":\"action must be start or stop\"}");
+		}
+	}
+
+	private static class BmsControlHandler implements HttpHandler {
+		@Override
+		public void handle(HttpExchange exchange) throws IOException {
+			if (handleCorsAndPreflight(exchange)) {
+				return;
+			}
+			if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+				writeJson(exchange, 405, "{\"error\":\"Method not allowed\"}");
+				return;
+			}
+
+			Map<String, String> params = parseQuery(readBody(exchange.getRequestBody()));
+			String action = firstNonBlank(params.get("action"), "").trim().toLowerCase(Locale.ROOT);
+			String serialPort = firstNonBlank(params.get("serialPort"), params.get("port"), readConfigValue("SERIAL_PORT", "COM5")).trim().toUpperCase(Locale.ROOT);
+
+			if (!isSupportedSerialPort(serialPort)) {
+				writeJson(exchange, 400, "{\"error\":\"serialPort must look like COM3, COM5 or SIMULATED\"}");
+				return;
+			}
+			if ("SIMULATED".equals(serialPort)) {
+				writeJson(exchange, 400, "{\"error\":\"Maintenance commands are unavailable in SIMULATED mode.\"}");
+				return;
+			}
+
+			String message;
+			try (TinyBmsUartSettingsService uart = new TinyBmsUartSettingsService(serialPort, parseIntEnv("SERIAL_BAUD", 115200))) {
+				switch (action) {
+					case "reset":
+						uart.resetBms();
+						message = "BMS reset command sent.";
+						break;
+					case "clear-events":
+						uart.clearEvents();
+						message = "Clear events command sent.";
+						break;
+					case "clear-statistics":
+						uart.clearStatistics();
+						message = "Clear statistics command sent.";
+						break;
+					default:
+						writeJson(exchange, 400, "{\"error\":\"action must be reset, clear-events or clear-statistics\"}");
+						return;
+				}
+			} catch (Exception ex) {
+				writeJson(exchange, 500, "{\"error\":\"" + escapeJson(ex.getMessage()) + "\"}");
+				return;
+			}
+
+			writeJson(exchange, 200, "{\"ok\":true,\"action\":\"" + escapeJson(action) + "\",\"serialPort\":\"" + escapeJson(serialPort) + "\",\"message\":\"" + escapeJson(message) + "\"}");
+		}
+	}
+
 	private static boolean handleCorsAndPreflight(HttpExchange exchange) throws IOException {
 		Headers headers = exchange.getResponseHeaders();
 		headers.add("Access-Control-Allow-Origin", "*");
@@ -1556,6 +1715,174 @@ public class BmsApiServer {
 		return sb.toString();
 	}
 
+	private static Path resolveEnvPath() {
+		return Path.of(".env").toAbsolutePath().normalize();
+	}
+
+	private static String readConfigValue(String key, String fallback) {
+		Path envPath = resolveEnvPath();
+		if (!Files.exists(envPath)) {
+			return fallback;
+		}
+		try {
+			for (String line : Files.readAllLines(envPath, StandardCharsets.UTF_8)) {
+				if (line == null) {
+					continue;
+				}
+				String trimmed = line.trim();
+				if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+					continue;
+				}
+				int eq = trimmed.indexOf('=');
+				if (eq <= 0) {
+					continue;
+				}
+				String currentKey = trimmed.substring(0, eq).trim();
+				if (!key.equals(currentKey)) {
+					continue;
+				}
+				return trimmed.substring(eq + 1).trim();
+			}
+		} catch (IOException ex) {
+			System.err.println("[BmsApiServer] Failed reading .env: " + ex.getMessage());
+		}
+		return fallback;
+	}
+
+	private static synchronized void writeConfigValue(String key, String value) throws IOException {
+		Path envPath = resolveEnvPath();
+		List<String> lines = Files.exists(envPath)
+			? new ArrayList<>(Files.readAllLines(envPath, StandardCharsets.UTF_8))
+			: new ArrayList<>();
+
+		boolean updated = false;
+		for (int i = 0; i < lines.size(); i++) {
+			String line = lines.get(i);
+			if (line == null) {
+				continue;
+			}
+			String trimmed = line.trim();
+			if (trimmed.startsWith(key + "=")) {
+				lines.set(i, key + "=" + value);
+				updated = true;
+				break;
+			}
+		}
+
+		if (!updated) {
+			if (!lines.isEmpty() && !lines.get(lines.size() - 1).isBlank()) {
+				lines.add("");
+			}
+			lines.add(key + "=" + value);
+		}
+
+		Files.write(envPath, lines, StandardCharsets.UTF_8);
+	}
+
+	private static synchronized void startUartProcess(String port) throws IOException {
+		stopUartProcess();
+
+		String normalizedPort = firstNonBlank(port, "COM5").trim().toUpperCase(Locale.ROOT);
+		if (!isSupportedSerialPort(normalizedPort)) {
+			throw new IOException("serialPort must look like COM3, COM5 or SIMULATED");
+		}
+
+		Path workDir = Path.of(".").toAbsolutePath().normalize();
+		ProcessBuilder builder = new ProcessBuilder("cmd", "/c", "run_uart_sender.bat", "--no-pause", normalizedPort);
+		builder.directory(workDir.toFile());
+		builder.redirectErrorStream(true);
+
+		appendUartLog("[UART] Starting sender on " + normalizedPort);
+		Process process = builder.start();
+		uartProcess = process;
+		uartProcessPort = normalizedPort;
+		uartStartedAt = Instant.now();
+		startUartLogPump(process);
+	}
+
+	private static synchronized void stopUartProcess() {
+		Process process = uartProcess;
+		uartProcess = null;
+		uartProcessPort = "";
+		uartStartedAt = null;
+		if (process != null) {
+			appendUartLog("[UART] Stopping sender");
+			process.destroy();
+			try {
+				process.waitFor(2, TimeUnit.SECONDS);
+			} catch (InterruptedException ex) {
+				Thread.currentThread().interrupt();
+			}
+			if (process.isAlive()) {
+				process.destroyForcibly();
+			}
+		}
+	}
+
+	private static void startUartLogPump(Process process) {
+		Thread thread = new Thread(() -> {
+			try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+				String line;
+				while ((line = reader.readLine()) != null) {
+					appendUartLog(line);
+				}
+			} catch (IOException ex) {
+				appendUartLog("[UART] Log pump error: " + ex.getMessage());
+			} finally {
+				try {
+					int exitCode = process.waitFor();
+					appendUartLog("[UART] Sender exited with code " + exitCode);
+				} catch (InterruptedException ex) {
+					Thread.currentThread().interrupt();
+				}
+				if (uartProcess == process) {
+					uartProcess = null;
+					uartProcessPort = "";
+					uartStartedAt = null;
+				}
+			}
+		}, "uart-log-pump");
+		thread.setDaemon(true);
+		thread.start();
+	}
+
+	private static void appendUartLog(String line) {
+		if (line == null) {
+			return;
+		}
+		synchronized (uartLogs) {
+			uartLogs.addLast(line);
+			while (uartLogs.size() > MAX_UART_LOG_LINES) {
+				uartLogs.removeFirst();
+			}
+		}
+	}
+
+	private static String uartStatusJson(String state) {
+		Process process = uartProcess;
+		boolean running = process != null && process.isAlive();
+		StringBuilder logsJson = new StringBuilder();
+		logsJson.append('[');
+		synchronized (uartLogs) {
+			boolean first = true;
+			for (String line : uartLogs) {
+				if (!first) {
+					logsJson.append(',');
+				}
+				first = false;
+				logsJson.append('"').append(escapeJson(line)).append('"');
+			}
+		}
+		logsJson.append(']');
+
+		String startedAt = uartStartedAt == null ? "" : uartStartedAt.toString();
+		return "{\"state\":\"" + escapeJson(state) + "\"" +
+			",\"running\":" + running +
+			",\"serialPort\":\"" + escapeJson(uartProcessPort) + "\"" +
+			",\"startedAt\":\"" + escapeJson(startedAt) + "\"" +
+			",\"logs\":" + logsJson + "}";
+	}
+
 	private static Set<Integer> parseAllowedModules(String value) {
 		Set<Integer> result = new HashSet<>();
 		if (value == null || value.trim().isEmpty()) {
@@ -1573,6 +1900,68 @@ public class BmsApiServer {
 
 	private static int parseIntEnv(String name, int fallback) {
 		return safeInt(System.getenv(name), fallback);
+	}
+
+	private static boolean isSupportedSerialPort(String value) {
+		if (value == null) {
+			return false;
+		}
+		String normalized = value.trim().toUpperCase(Locale.ROOT);
+		return normalized.matches("COM\\d+") || "SIMULATED".equals(normalized);
+	}
+
+	private static List<String> listAvailableSerialPorts() {
+		Set<String> ports = new HashSet<>();
+		ports.add("SIMULATED");
+
+		try {
+			Process process = new ProcessBuilder("reg", "query", "HKEY_LOCAL_MACHINE\\HARDWARE\\DEVICEMAP\\SERIALCOMM")
+				.redirectErrorStream(true)
+				.start();
+			try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+				String line;
+				while ((line = reader.readLine()) != null) {
+					String normalized = line.trim().toUpperCase(Locale.ROOT);
+					int comIndex = normalized.indexOf("COM");
+					if (comIndex < 0) {
+						continue;
+					}
+					String candidate = normalized.substring(comIndex).trim();
+					int end = 3;
+					while (end < candidate.length() && Character.isDigit(candidate.charAt(end))) {
+						end++;
+					}
+					String port = candidate.substring(0, end);
+					if (port.matches("COM\\d+")) {
+						ports.add(port);
+					}
+				}
+			}
+			process.waitFor(2, TimeUnit.SECONDS);
+		} catch (Exception ignored) {
+			// Best-effort only. We still return SIMULATED.
+		}
+
+		List<String> sorted = new ArrayList<>(ports);
+		sorted.sort((a, b) -> {
+			if ("SIMULATED".equals(a)) return -1;
+			if ("SIMULATED".equals(b)) return 1;
+			return a.compareTo(b);
+		});
+		return sorted;
+	}
+
+	private static String stringListToJson(List<String> values) {
+		StringBuilder sb = new StringBuilder();
+		sb.append('[');
+		for (int i = 0; i < values.size(); i++) {
+			if (i > 0) {
+				sb.append(',');
+			}
+			sb.append('"').append(escapeJson(values.get(i))).append('"');
+		}
+		sb.append(']');
+		return sb.toString();
 	}
 
 	private static Map<String, String> parseQuery(String query) {

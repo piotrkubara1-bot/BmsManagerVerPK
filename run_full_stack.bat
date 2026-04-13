@@ -15,6 +15,9 @@ if /I "%MODE%"=="stop" (
 if "%BMS_API_PORT%"=="" set "BMS_API_PORT=8090"
 if "%WEB_UI_PORT%"=="" set "WEB_UI_PORT=8088"
 
+call "%~dp0stop_all.bat" >nul 2>nul
+timeout /t 1 /nobreak >nul
+
 echo [FullStack] Starting service mode: %MODE%
 start "BMS-Service" /D "%~dp0" /B cmd /c "set BMS_API_PORT=%BMS_API_PORT% && call run_service.bat %MODE%"
 

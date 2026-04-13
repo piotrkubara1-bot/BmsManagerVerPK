@@ -2,6 +2,7 @@
 <?import javafx.scene.chart.LineChart?>
 <?import javafx.scene.chart.NumberAxis?>
 <?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckBox?>
 <?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.Tab?>
@@ -263,11 +264,20 @@
 									<children>
 										<Label text="Module" textFill="#d7e2ef"/>
 										<ComboBox fx:id="cmbSettingsModule" prefWidth="120.0"/>
+										<Label text="UART COM" textFill="#d7e2ef"/>
+										<TextField fx:id="txtSettingsPort" prefWidth="120.0" promptText="COM5"/>
+										<CheckBox fx:id="chkSettingsExpertMode" text="EXPERT mode" textFill="#d7e2ef"/>
+										<Button fx:id="btnApplySafeProfile" text="Apply SAFE profile"/>
+									</children>
+								</HBox>
+
+								<HBox spacing="8.0" alignment="CENTER_LEFT">
+									<children>
 										<Label text="Setting" textFill="#d7e2ef"/>
 										<ComboBox fx:id="cmbSettingsKey" prefWidth="320.0"/>
 										<Label text="Value" textFill="#d7e2ef"/>
 										<TextField fx:id="txtSettingsValue" prefWidth="140.0" promptText="numeric value"/>
-										<Button fx:id="btnApplySetting" text="Apply"/>
+										<Button fx:id="btnApplySetting" text="Write + Save"/>
 										<Label fx:id="lblSettingsStatus" text="" textFill="#d7e2ef"/>
 									</children>
 								</HBox>

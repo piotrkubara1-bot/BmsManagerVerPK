@@ -6,7 +6,10 @@ import javafx.scene.Node;
 import javafx.scene.chart.LineChart;
 import javafx.scene.chart.NumberAxis;
 import javafx.scene.chart.XYChart;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.TableColumn;
@@ -30,6 +33,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -43,8 +47,12 @@ import java.util.regex.Pattern;
 public class FXMLController {
 	private static final String INPUT_MODE = env("GUI_INPUT_MODE", "api").toLowerCase(Locale.ROOT);
 	private static final String API_BASE = env("GUI_API_BASE", "http://127.0.0.1:8090");
+	private static final String DEFAULT_SERIAL_PORT = env("SERIAL_PORT", "COM5");
+	private static final int DEFAULT_SERIAL_BAUD = safeInt(env("SERIAL_BAUD", "115200"), 115200);
 	private static final int DEFAULT_MODULE_ID = parseDisplayModuleId();
 	private static final int HISTORY_LIMIT = 400;
+	private static final double MAX_SAFE_OV = 4.25;
+	private static final double MIN_SAFE_UV = 2.8;
 	private static final List<String> CHART_ORDER = Arrays.asList("voltage", "current", "soc", "status", "cells");
 	private static final String[] CELL_SERIES_COLORS = new String[] {
 		"#67b6ff", "#f7c453", "#38d889", "#ff8ea0", "#b7a1ff", "#ff6a2a", "#8fd6a3", "#9ad0ff"
@@ -177,7 +185,16 @@ public class FXMLController {
 	private TextField txtSettingsValue;
 
 	@FXML
+	private TextField txtSettingsPort;
+
+	@FXML
+	private CheckBox chkSettingsExpertMode;
+
+	@FXML
 	private Button btnApplySetting;
+
+	@FXML
+	private Button btnApplySafeProfile;
 
 	@FXML
 	private Label lblSettingsStatus;
@@ -259,6 +276,7 @@ public class FXMLController {
 	private ScheduledExecutorService poller;
 	private volatile boolean refreshRunning;
 	private volatile String zoomedChartKey;
+	private volatile SettingsSnapshot latestSettingsSnapshot;
 
 	public void initialize() {
 		initCombos();
@@ -293,6 +311,12 @@ public class FXMLController {
 		if (cmbSettingsModule != null) {
 			cmbSettingsModule.getItems().setAll("1", "2", "3", "4");
 			cmbSettingsModule.setValue(String.valueOf(DEFAULT_MODULE_ID));
+		}
+		if (txtSettingsPort != null) {
+			txtSettingsPort.setText(DEFAULT_SERIAL_PORT);
+		}
+		if (chkSettingsExpertMode != null) {
+			chkSettingsExpertMode.setSelected(false);
 		}
 	}
 
@@ -536,6 +560,12 @@ public class FXMLController {
 		if (btnApplySetting != null) {
 			btnApplySetting.setOnAction(event -> submitSettingUpdate());
 		}
+		if (btnApplySafeProfile != null) {
+			btnApplySafeProfile.setOnAction(event -> submitSafeProfile());
+		}
+		if (chkSettingsExpertMode != null) {
+			chkSettingsExpertMode.setOnAction(event -> updateSettingsModeStatus());
+		}
 	}
 
 	private void triggerManualRefresh() {
@@ -596,6 +626,7 @@ public class FXMLController {
 				applyStats(stats, history, sinceMinutes);
 				tblEvents.setItems(FXCollections.observableArrayList(events));
 				applyRpi(rpi);
+				latestSettingsSnapshot = settings;
 				applySettings(settings);
 				lblConnection.setText("API OK | " + API_BASE + " | " + LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")));
 			});
@@ -616,6 +647,8 @@ public class FXMLController {
 		String moduleValue = cmbSettingsModule == null ? null : cmbSettingsModule.getValue();
 		String settingDisplay = cmbSettingsKey == null ? null : cmbSettingsKey.getValue();
 		String numericValue = txtSettingsValue == null ? "" : txtSettingsValue.getText().trim();
+		String serialPort = txtSettingsPort == null ? DEFAULT_SERIAL_PORT : txtSettingsPort.getText().trim();
+		boolean expertMode = chkSettingsExpertMode != null && chkSettingsExpertMode.isSelected();
 
 		int moduleId = safeInt(moduleValue, 0);
 		String settingKey = settingsDisplayToKey.get(settingDisplay);
@@ -635,20 +668,80 @@ public class FXMLController {
 			setSettingsStatus("Value must be numeric.", false);
 			return;
 		}
+		if (serialPort.isBlank()) {
+			setSettingsStatus("Serial port is required.", false);
+			return;
+		}
 
-		setSettingsStatus("Saving setting...", true);
+		double numeric = safeDouble(numericValue, Double.NaN);
+		String validationError = validateSettingBeforeWrite(moduleId, settingKey, numeric, expertMode);
+		if (validationError != null) {
+			setSettingsStatus(validationError, false);
+			return;
+		}
+		if (!confirmSettingsWrite(
+			"Write setting to TinyBMS?",
+			"Module " + moduleId + ", key " + settingKey + ", value " + formatDecimal(numeric, 4) + ", port " + serialPort
+		)) {
+			setSettingsStatus("Update canceled.", false);
+			return;
+		}
+
+		setSettingsStatus("Writing to TinyBMS over UART...", true);
 		Thread thread = new Thread(() -> {
-			try {
+			try (TinyBmsUartSettingsService uart = new TinyBmsUartSettingsService(serialPort, DEFAULT_SERIAL_BAUD)) {
+				uart.writeSetting(settingKey, numeric);
 				String body = "moduleId=" + urlEncode(String.valueOf(moduleId))
 					+ "&key=" + urlEncode(settingKey)
 					+ "&value=" + urlEncode(numericValue);
 				httpPostForm("/api/cell-settings", body);
-				Platform.runLater(() -> setSettingsStatus("Setting updated.", true));
+				Platform.runLater(() -> setSettingsStatus("UART write OK and backend synced.", true));
 				refreshFromApi();
 			} catch (Exception ex) {
 				Platform.runLater(() -> setSettingsStatus("Update failed: " + ex.getMessage(), false));
 			}
 		}, "gui-setting-update");
+		thread.setDaemon(true);
+		thread.start();
+	}
+
+	private void submitSafeProfile() {
+		if ("stdin".equals(INPUT_MODE)) {
+			setSettingsStatus("SAFE profile is unavailable in stdin mode.", false);
+			return;
+		}
+
+		String moduleValue = cmbSettingsModule == null ? null : cmbSettingsModule.getValue();
+		String serialPort = txtSettingsPort == null ? DEFAULT_SERIAL_PORT : txtSettingsPort.getText().trim();
+		int moduleId = safeInt(moduleValue, 0);
+		if (moduleId < 1 || moduleId > 4) {
+			setSettingsStatus("Select module 1..4.", false);
+			return;
+		}
+		if (serialPort.isBlank()) {
+			setSettingsStatus("Serial port is required.", false);
+			return;
+		}
+		if (!confirmSettingsWrite(
+			"Apply SAFE profile?",
+			"Module " + moduleId + ", OV=4.2 V, UV=3.0 V, port " + serialPort
+		)) {
+			setSettingsStatus("SAFE profile canceled.", false);
+			return;
+		}
+
+		setSettingsStatus("Applying SAFE profile over UART...", true);
+		Thread thread = new Thread(() -> {
+			try (TinyBmsUartSettingsService uart = new TinyBmsUartSettingsService(serialPort, DEFAULT_SERIAL_BAUD)) {
+				uart.applySafeLiIonProfile();
+				httpPostForm("/api/cell-settings", "moduleId=" + urlEncode(String.valueOf(moduleId)) + "&key=overvoltage_protection_v&value=4.2");
+				httpPostForm("/api/cell-settings", "moduleId=" + urlEncode(String.valueOf(moduleId)) + "&key=undervoltage_protection_v&value=3.0");
+				Platform.runLater(() -> setSettingsStatus("SAFE profile applied and backend synced.", true));
+				refreshFromApi();
+			} catch (Exception ex) {
+				Platform.runLater(() -> setSettingsStatus("SAFE profile failed: " + ex.getMessage(), false));
+			}
+		}, "gui-safe-profile-update");
 		thread.setDaemon(true);
 		thread.start();
 	}
@@ -659,6 +752,67 @@ public class FXMLController {
 		}
 		lblSettingsStatus.setText(message);
 		lblSettingsStatus.setStyle(ok ? "-fx-text-fill: #29d391;" : "-fx-text-fill: #ff6b6b;");
+	}
+
+	private void updateSettingsModeStatus() {
+		boolean expertMode = chkSettingsExpertMode != null && chkSettingsExpertMode.isSelected();
+		setSettingsStatus(
+			expertMode
+				? "EXPERT mode: wider ranges and direct UART write for supported TinyBMS keys."
+				: "SAFE mode: extra checks enabled. OV <= 4.25 V and UV >= 2.8 V.",
+			true
+		);
+	}
+
+	private String validateSettingBeforeWrite(int moduleId, String settingKey, double value, boolean expertMode) {
+		if (!Double.isFinite(value)) {
+			return "Value must be numeric.";
+		}
+		if (!TinyBmsUartSettingsService.supportsKey(settingKey)) {
+			return "Selected setting is not supported for TinyBMS UART write.";
+		}
+
+		SettingsSnapshot snapshot = latestSettingsSnapshot;
+		if (snapshot != null) {
+			SettingBounds bounds = snapshot.boundsByKey.get(settingKey);
+			if (bounds != null && (value < bounds.min || value > bounds.max)) {
+				return "Value out of range. Allowed: " + formatDecimal(bounds.min, 4) + " .. " + formatDecimal(bounds.max, 4);
+			}
+		}
+
+		double currentOv = getModuleSettingValue(moduleId, "overvoltage_protection_v");
+		double currentUv = getModuleSettingValue(moduleId, "undervoltage_protection_v");
+		double targetOv = "overvoltage_protection_v".equals(settingKey) ? value : currentOv;
+		double targetUv = "undervoltage_protection_v".equals(settingKey) ? value : currentUv;
+
+		if (Double.isFinite(targetOv) && Double.isFinite(targetUv) && targetOv <= targetUv) {
+			return "OV must be higher than UV.";
+		}
+		if (!expertMode) {
+			if ("overvoltage_protection_v".equals(settingKey) && value > MAX_SAFE_OV) {
+				return "SAFE mode blocks OV above " + MAX_SAFE_OV + " V.";
+			}
+			if ("undervoltage_protection_v".equals(settingKey) && value < MIN_SAFE_UV) {
+				return "SAFE mode blocks UV below " + MIN_SAFE_UV + " V.";
+			}
+		}
+		return null;
+	}
+
+	private double getModuleSettingValue(int moduleId, String key) {
+		SettingsSnapshot snapshot = latestSettingsSnapshot;
+		if (snapshot == null) {
+			return Double.NaN;
+		}
+		Map<String, Double> moduleValues = snapshot.valuesByModule.getOrDefault(moduleId, Collections.emptyMap());
+		return moduleValues.getOrDefault(key, Double.NaN);
+	}
+
+	private boolean confirmSettingsWrite(String title, String content) {
+		Alert alert = new Alert(Alert.AlertType.CONFIRMATION, content, ButtonType.OK, ButtonType.CANCEL);
+		alert.setTitle(title);
+		alert.setHeaderText(title);
+		return alert.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK;
 	}
 
 	private void parseAndUpdateLiveFromLine(String line) {
@@ -870,6 +1024,7 @@ public class FXMLController {
 	}
 
 	private SettingsSnapshot parseSettingsSnapshot(String json) {
+		SettingsSnapshot snapshot = new SettingsSnapshot();
 		List<String> moduleObjects = extractObjectsFromArray(json);
 		Map<String, SettingAccumulator> byKey = new LinkedHashMap<>();
 
@@ -893,11 +1048,12 @@ public class FXMLController {
 				acc.min = extractNumberField(settingObj, "min", 0.0);
 				acc.max = extractNumberField(settingObj, "max", 0.0);
 				acc.writable = extractBoolField(settingObj, "writable", false);
-				acc.values[moduleId] = extractNumberField(settingObj, "value", Double.NaN);
+				double parsedValue = extractNumberField(settingObj, "value", Double.NaN);
+				acc.values[moduleId] = parsedValue;
+				snapshot.valuesByModule.computeIfAbsent(moduleId, ignored -> new HashMap<>()).put(key, parsedValue);
 			}
 		}
 
-		SettingsSnapshot snapshot = new SettingsSnapshot();
 		for (SettingAccumulator acc : byKey.values()) {
 			snapshot.rows.add(new SettingRow(
 				acc.label,
@@ -910,8 +1066,9 @@ public class FXMLController {
 				formatSettingValue(acc.values[4]),
 				acc.writable ? "YES" : "RO"
 			));
+			snapshot.boundsByKey.put(acc.key, new SettingBounds(acc.min, acc.max));
 
-			if (acc.writable) {
+			if (acc.writable && TinyBmsUartSettingsService.supportsKey(acc.key)) {
 				snapshot.writableOptions.add(new SettingOption(acc.key, acc.label + " (" + acc.unit + ")"));
 			}
 		}
@@ -1043,6 +1200,7 @@ public class FXMLController {
 				cmbSettingsKey.getItems().clear();
 			}
 			settingsDisplayToKey.clear();
+			updateSettingsModeStatus();
 			return;
 		}
 
@@ -1065,6 +1223,7 @@ public class FXMLController {
 		} else if (!displayValues.isEmpty()) {
 			cmbSettingsKey.setValue(displayValues.get(0));
 		}
+		updateSettingsModeStatus();
 	}
 
 	private void applyRpi(RpiSnapshot snapshot) {
@@ -1353,6 +1512,8 @@ public class FXMLController {
 	private static final class SettingsSnapshot {
 		final List<SettingRow> rows = new ArrayList<>();
 		final List<SettingOption> writableOptions = new ArrayList<>();
+		final Map<Integer, Map<String, Double>> valuesByModule = new HashMap<>();
+		final Map<String, SettingBounds> boundsByKey = new HashMap<>();
 	}
 
 	private static final class SettingOption {
@@ -1373,6 +1534,16 @@ public class FXMLController {
 		double max;
 		boolean writable;
 		final double[] values = new double[] {Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN};
+	}
+
+	private static final class SettingBounds {
+		final double min;
+		final double max;
+
+		SettingBounds(double min, double max) {
+			this.min = min;
+			this.max = max;
+		}
 	}
 
 	public static final class EventRow {

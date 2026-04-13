@@ -26,8 +26,13 @@ if "%MODE%"=="" set "MODE=normal"
 if not exist lib mkdir lib
 if not exist bin mkdir bin
 
+if not exist "lib\jSerialComm-2.11.0.jar" (
+    echo [Service] Downloading jSerialComm...
+    "%POWERSHELL_EXE%" -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://repo1.maven.org/maven2/com/fazecast/jSerialComm/2.11.0/jSerialComm-2.11.0.jar' -OutFile 'lib\jSerialComm-2.11.0.jar'"
+)
+
 echo [Service] Compiling BmsApiServer...
-"%JAVAC_EXE%" -d bin src\main\java\BmsApiServer.java src\main\java\BmsTestFeeder.java
+"%JAVAC_EXE%" -d bin -cp "bin;lib/*" src\main\java\TinyBmsUartSettingsService.java src\main\java\BmsApiServer.java src\main\java\BmsTestFeeder.java
 if errorlevel 1 (
     echo [Service] Compilation failed.
     exit /b 1

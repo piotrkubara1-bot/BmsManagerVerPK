@@ -17,6 +17,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -30,6 +31,8 @@ public class BmsUartSender {
     private final int moduleId;
     private final String ingestUrl;
     private final int pollIntervalMs;
+    private final boolean simulatorMode;
+    private final Random simulatorRandom = new Random();
 
     private SerialPort port;
     private InputStream in;
@@ -44,6 +47,7 @@ public class BmsUartSender {
         this.moduleId = Integer.parseInt(env("DEFAULT_MODULE_ID", "1"));
         this.ingestUrl = env("BMS_API_INGEST_URL", "http://127.0.0.1:8090/api/ingest");
         this.pollIntervalMs = Integer.parseInt(env("TINYBMS_POLL_INTERVAL_MS", "2000"));
+        this.simulatorMode = "SIMULATED".equalsIgnoreCase(portName);
     }
 
     public void start() {
@@ -52,6 +56,9 @@ public class BmsUartSender {
         System.out.println("Module ID: " + moduleId);
         System.out.println("Ingest URL: " + ingestUrl);
         System.out.println("Native temp dir: " + NATIVE_TMP_DIR.toAbsolutePath());
+        if (simulatorMode) {
+            System.out.println("[BmsUartSender] SIMULATED mode enabled.");
+        }
 
         initPort();
 
@@ -59,6 +66,10 @@ public class BmsUartSender {
         scheduler.scheduleAtFixedRate(this::pollAndSend, 1000, pollIntervalMs, TimeUnit.MILLISECONDS);
 
         scheduler.scheduleAtFixedRate(() -> {
+            if (simulatorMode) {
+                connected = true;
+                return;
+            }
             if (port == null || !port.isOpen() || !connected) {
                 System.out.println("[BmsUartSender] Watchdog: Port closed or not connected, reconnecting...");
                 resetConnectionState();
@@ -124,6 +135,12 @@ public class BmsUartSender {
 
     private void initPort() {
         try {
+            if (simulatorMode) {
+                resetConnectionState();
+                connected = true;
+                System.out.println("[BmsUartSender] Simulation source ready");
+                return;
+            }
             if (port != null && port.isOpen()) {
                 port.closePort();
             }
@@ -162,7 +179,7 @@ public class BmsUartSender {
         if (!connected) return;
 
         try {
-            TinyBmsSnapshot snapshot = readSnapshot();
+            TinyBmsSnapshot snapshot = simulatorMode ? buildSimulatedSnapshot() : readSnapshot();
             if (snapshot != null) {
                 String line = formatBmsLine(snapshot);
                 sendToServer(line);
@@ -175,6 +192,19 @@ public class BmsUartSender {
 
     private void sendHeartbeat() {
         sendToServer("HEARTBEAT," + moduleId);
+    }
+
+    private TinyBmsSnapshot buildSimulatedSnapshot() {
+        float voltage = (float) (12.5 + simulatorRandom.nextDouble() * 2.2);
+        float current = (float) (-8.0 + simulatorRandom.nextDouble() * 18.0);
+        double socPercent = 45.0 + simulatorRandom.nextDouble() * 50.0;
+        long socRaw = Math.round(socPercent * 1_000_000.0);
+        int status = 155;
+        List<Integer> cells = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            cells.add(3300 + simulatorRandom.nextInt(700));
+        }
+        return new TinyBmsSnapshot(voltage, current, socRaw, status, cells);
     }
 
     private TinyBmsSnapshot readSnapshot() throws Exception {
@@ -378,16 +408,24 @@ public class BmsUartSender {
             if (trimmed.startsWith("--port=")) {
                 String value = trimmed.substring("--port=".length()).trim();
                 if (!value.isEmpty()) {
-                    return value;
+                    return normalizePort(value);
                 }
             }
 
             if (!trimmed.startsWith("--")) {
-                return trimmed;
+                return normalizePort(trimmed);
             }
         }
 
-        return fallback;
+        return normalizePort(fallback);
+    }
+
+    private String normalizePort(String value) {
+        String trimmed = value == null ? "" : value.trim();
+        if (trimmed.equalsIgnoreCase("SIM") || trimmed.equalsIgnoreCase("SIMULATED")) {
+            return "SIMULATED";
+        }
+        return trimmed;
     }
 
     public static void main(String[] args) {

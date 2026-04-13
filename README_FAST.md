@@ -1,58 +1,61 @@
 # README FAST
 
-Szybka instrukcja uruchomienia na Windows.
+Najkrótsza wersja dla Windows.
 
-## 1. Otwórz folder projektu
-
-Przejdź do:
+## 1. Wejdź do folderu
 
 ```powershell
 C:\Users\Piotrek\IdeaProjects\BmsManager
 ```
 
-## 2. Skopiuj konfigurację
+## 2. Skopiuj `.env`
 
 ```powershell
 Copy-Item ".env.example" ".env"
 ```
 
-Jeśli plik `.env` już istnieje, pomiń ten krok.
-
-## 3. Ustaw port COM
-
-Otwórz plik [.env](C:/Users/Piotrek/IdeaProjects/BmsManager/.env) i ustaw:
-
-```env
-SERIAL_PORT=COM5
-```
-
-Zmień `COM5` na swój prawdziwy port, jeśli trzeba.
-
-## 4. Włącz MySQL w XAMPP
-
-Uruchom:
+## 3. Jedna komenda do odpalenia serwera
 
 ```powershell
-& "C:\xampp\xampp-control.exe"
+.\run_server_stack.bat
 ```
 
-W XAMPP kliknij `Start` przy `MySQL`.
+To robi:
 
-## 5. Utwórz bazę danych
+- MySQL
+- schema bazy
+- backend
+- Web UI
 
-```powershell
-$sql = Get-Content -Raw "bms_schema.sql"
-& "C:\xampp\mysql\bin\mysql.exe" -u root -e $sql
+## 4. Otwórz dashboard
+
+```text
+http://127.0.0.1:8088/dashboard.html
 ```
 
-## 6. Uruchom backend i Web UI
+## 5. Jeśli nie masz BMS
 
-```powershell
-.\stop_all.bat
-.\run_full_stack.bat normal
+W Web UI:
+
+1. wejdź w `Cell Settings`
+2. wpisz:
+
+```text
+SIMULATED
 ```
 
-## 7. Sprawdź backend
+3. kliknij `Save COM Port`
+4. kliknij `Start UART`
+
+## 6. Jeśli masz prawdziwy BMS
+
+W Web UI:
+
+1. wpisz np. `COM3` albo `COM5`
+2. kliknij `Save COM Port`
+3. kliknij `Start UART`
+
+## 7. Sprawdź health
 
 ```powershell
 curl.exe http://127.0.0.1:8090/api/health
@@ -65,52 +68,38 @@ Ma być:
 "dbConnected":true
 ```
 
-## 8. Otwórz dashboard
+## 8. Stop
 
-W przeglądarce otwórz:
+```powershell
+.\run_server_stack.bat stop
+```
+
+## 9. Aplikacja mobilna
+
+Osobny projekt jest tutaj:
+
+[mobile-viewer-android](C:/Users/Piotrek/IdeaProjects/BmsManager/mobile-viewer-android)
+
+Otwórz ten folder w Android Studio osobno.
+
+Apka mobilna jest w Java.
+
+Telefon musi być w tym samym Wi-Fi co komputer.
+
+Na PC sprawdź IP:
+
+```powershell
+ipconfig
+```
+
+W telefonie wpisz adres backendu, np.:
 
 ```text
-http://127.0.0.1:8088/dashboard.html
+http://192.168.1.100:8090
 ```
 
-## 9. Uruchom UART sender
+Nie wpisuj `127.0.0.1`.
 
-Jeśli znasz port:
+## 10. Pełna instrukcja
 
-```powershell
-.\run_uart_sender.bat COM5
-```
-
-albo:
-
-```powershell
-.\run_uart_sender.bat COM3
-```
-
-## 10. Jeśli coś nie działa
-
-### Backend nie działa
-
-Uruchom jeszcze raz:
-
-```powershell
-.\stop_all.bat
-.\run_full_stack.bat normal
-```
-
-### `dbConnected:false`
-
-To znaczy, że MySQL nie działa albo baza nie została utworzona.
-
-### `Failed to open port COMx`
-
-To znaczy:
-
-- zły numer COM
-- port zajęty
-- urządzenie niepodłączone
-
-## Pełna instrukcja
-
-Jeśli chcesz dokładniejszą wersję, zobacz:
 [README.md](C:/Users/Piotrek/IdeaProjects/BmsManager/README.md)

@@ -104,6 +104,35 @@
 
 		<section id="tab-cell-settings" class="tab-content">
 			<div class="settings-note">
+				Backend, Web UI i baza danych mogą działać bez podłączonego BMS. Brak telemetry oznacza tylko brak danych z UART.
+			</div>
+			<form id="serialConfigForm" class="settings-form">
+				<label>
+					Saved COM Port
+					<select id="serialPortValue" required></select>
+				</label>
+				<button type="submit">Save COM Port</button>
+				<span id="serialConfigStatus"></span>
+			</form>
+			<div class="settings-form">
+				<button id="uartStartBtn" type="button">Start UART</button>
+				<button id="uartStopBtn" type="button">Stop UART</button>
+				<span id="uartControlStatus"></span>
+			</div>
+			<div class="settings-form">
+				<button id="bmsResetBtn" type="button">Reset BMS</button>
+				<button id="bmsClearEventsBtn" type="button">Clear Events</button>
+				<button id="bmsClearStatisticsBtn" type="button">Clear Statistics</button>
+				<span id="bmsControlStatus"></span>
+			</div>
+			<div class="settings-note" id="serialConfigMeta">
+				Loading serial configuration...
+			</div>
+			<div class="settings-note" id="uartRuntimeMeta">
+				Loading UART status...
+			</div>
+			<pre id="uartLogs" class="uart-logs">No UART logs yet.</pre>
+			<div class="settings-note">
 				These are basic host-side settings values used by the control app.
 			</div>
 			<form id="settingsForm" class="settings-form">

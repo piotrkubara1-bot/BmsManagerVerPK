@@ -1,5 +1,7 @@
 const API_BASE = window.BMS_API_BASE || "http://127.0.0.1:8090";
 let cachedSettingsRows = [];
+let cachedRuntimeConfig = null;
+let cachedUartStatus = null;
 const statsState = {
 	moduleId: 1,
 	sinceMinutes: 60,
@@ -589,6 +591,232 @@ function wireSettingsForm() {
 	});
 }
 
+function renderRuntimeConfig(config) {
+	const portInput = document.getElementById("serialPortValue");
+	const meta = document.getElementById("serialConfigMeta");
+	if (!portInput || !meta) {
+		return;
+	}
+
+	if (!config || typeof config !== "object") {
+		portInput.value = "";
+		meta.textContent = "Runtime config unavailable.";
+		return;
+	}
+
+	cachedRuntimeConfig = config;
+	const ports = Array.isArray(config.availablePorts) ? [...config.availablePorts] : ["SIMULATED"];
+	const selected = String(config.serialPort || "").trim().toUpperCase();
+	if (selected && !ports.includes(selected)) {
+		ports.push(selected);
+	}
+	portInput.innerHTML = ports
+		.map((port) => `<option value="${escapeHtml(port)}">${escapeHtml(port)}</option>`)
+		.join("");
+	portInput.value = selected || "SIMULATED";
+	const bmsState = config.bmsConnected ? "telemetry detected" : "no BMS telemetry yet";
+	meta.textContent = `Saved in: ${config.envPath || ".env"} | ${bmsState}. Available options: ${ports.join(", ")}.`;
+}
+
+function renderUartStatus(status) {
+	const meta = document.getElementById("uartRuntimeMeta");
+	const logs = document.getElementById("uartLogs");
+	if (!meta || !logs) {
+		return;
+	}
+
+	if (!status || typeof status !== "object") {
+		meta.textContent = "UART status unavailable.";
+		logs.textContent = "No UART logs yet.";
+		return;
+	}
+
+	cachedUartStatus = status;
+	meta.textContent = status.running
+		? `UART sender is running on ${status.serialPort || "-"}.`
+		: "UART sender is stopped.";
+	logs.textContent = Array.isArray(status.logs) && status.logs.length
+		? status.logs.join("\n")
+		: "No UART logs yet.";
+}
+
+function wireRuntimeConfigForm() {
+	const form = document.getElementById("serialConfigForm");
+	if (!form) {
+		return;
+	}
+
+	form.addEventListener("submit", async (event) => {
+		event.preventDefault();
+		const portInput = document.getElementById("serialPortValue");
+		const statusEl = document.getElementById("serialConfigStatus");
+		const serialPort = String(portInput?.value || "").trim().toUpperCase();
+
+		if (!/^(COM\d+|SIMULATED)$/.test(serialPort)) {
+			statusEl.textContent = "Enter COM3, COM5 or SIMULATED.";
+			statusEl.style.color = "#ff6b6b";
+			return;
+		}
+
+		try {
+			const body = new URLSearchParams({ serialPort }).toString();
+			const response = await fetch(`${API_BASE}/api/runtime-config`, {
+				method: "POST",
+				headers: { "Content-Type": "application/x-www-form-urlencoded" },
+				body
+			});
+			const json = await response.json();
+			if (!response.ok) {
+				statusEl.textContent = `Save failed: ${json.error || response.status}`;
+				statusEl.style.color = "#ff6b6b";
+				return;
+			}
+			statusEl.textContent = json.message || "COM port saved.";
+			statusEl.style.color = "#29d391";
+			await refreshRuntimeConfig();
+		} catch (error) {
+			statusEl.textContent = "Save failed: service unreachable";
+			statusEl.style.color = "#ff6b6b";
+		}
+	});
+}
+
+async function refreshRuntimeConfig() {
+	try {
+		const response = await fetch(`${API_BASE}/api/runtime-config`);
+		const config = await response.json();
+		renderRuntimeConfig(config);
+	} catch (error) {
+		renderRuntimeConfig(null);
+	}
+}
+
+function wireUartControls() {
+	const startBtn = document.getElementById("uartStartBtn");
+	const stopBtn = document.getElementById("uartStopBtn");
+	const statusEl = document.getElementById("uartControlStatus");
+	if (!startBtn || !stopBtn || !statusEl) {
+		return;
+	}
+
+	startBtn.addEventListener("click", async () => {
+		const port = String(document.getElementById("serialPortValue")?.value || "").trim().toUpperCase();
+		if (!/^(COM\d+|SIMULATED)$/.test(port)) {
+			statusEl.textContent = "Enter COM3, COM5 or SIMULATED first.";
+			statusEl.style.color = "#ff6b6b";
+			return;
+		}
+
+		try {
+			const body = new URLSearchParams({ action: "start", serialPort: port }).toString();
+			const response = await fetch(`${API_BASE}/api/uart-control`, {
+				method: "POST",
+				headers: { "Content-Type": "application/x-www-form-urlencoded" },
+				body
+			});
+			const json = await response.json();
+			if (!response.ok) {
+				statusEl.textContent = `Start failed: ${json.error || response.status}`;
+				statusEl.style.color = "#ff6b6b";
+				return;
+			}
+			statusEl.textContent = `UART sender started on ${json.serialPort || port}.`;
+			statusEl.style.color = "#29d391";
+			renderUartStatus(json);
+		} catch (error) {
+			statusEl.textContent = "Start failed: service unreachable";
+			statusEl.style.color = "#ff6b6b";
+		}
+	});
+
+	stopBtn.addEventListener("click", async () => {
+		try {
+			const body = new URLSearchParams({ action: "stop" }).toString();
+			const response = await fetch(`${API_BASE}/api/uart-control`, {
+				method: "POST",
+				headers: { "Content-Type": "application/x-www-form-urlencoded" },
+				body
+			});
+			const json = await response.json();
+			if (!response.ok) {
+				statusEl.textContent = `Stop failed: ${json.error || response.status}`;
+				statusEl.style.color = "#ff6b6b";
+				return;
+			}
+			statusEl.textContent = "UART sender stopped.";
+			statusEl.style.color = "#29d391";
+			renderUartStatus(json);
+		} catch (error) {
+			statusEl.textContent = "Stop failed: service unreachable";
+			statusEl.style.color = "#ff6b6b";
+		}
+	});
+}
+
+function wireBmsControls() {
+	const resetBtn = document.getElementById("bmsResetBtn");
+	const clearEventsBtn = document.getElementById("bmsClearEventsBtn");
+	const clearStatisticsBtn = document.getElementById("bmsClearStatisticsBtn");
+	const statusEl = document.getElementById("bmsControlStatus");
+	if (!resetBtn || !clearEventsBtn || !clearStatisticsBtn || !statusEl) {
+		return;
+	}
+
+	async function sendControl(action, confirmText) {
+		const port = String(document.getElementById("serialPortValue")?.value || "").trim().toUpperCase();
+		if (!/^(COM\d+|SIMULATED)$/.test(port)) {
+			statusEl.textContent = "Choose a valid COM port or SIMULATED first.";
+			statusEl.style.color = "#ff6b6b";
+			return;
+		}
+		if (!window.confirm(confirmText)) {
+			return;
+		}
+
+		try {
+			const body = new URLSearchParams({ action, serialPort: port }).toString();
+			const response = await fetch(`${API_BASE}/api/bms-control`, {
+				method: "POST",
+				headers: { "Content-Type": "application/x-www-form-urlencoded" },
+				body
+			});
+			const json = await response.json();
+			if (!response.ok) {
+				statusEl.textContent = `Command failed: ${json.error || response.status}`;
+				statusEl.style.color = "#ff6b6b";
+				return;
+			}
+			statusEl.textContent = json.message || "Command sent.";
+			statusEl.style.color = "#29d391";
+		} catch (error) {
+			statusEl.textContent = "Command failed: service unreachable";
+			statusEl.style.color = "#ff6b6b";
+		}
+	}
+
+	resetBtn.addEventListener("click", async () => {
+		await sendControl("reset", "Send RESET BMS command?");
+	});
+
+	clearEventsBtn.addEventListener("click", async () => {
+		await sendControl("clear-events", "Send CLEAR EVENTS command?");
+	});
+
+	clearStatisticsBtn.addEventListener("click", async () => {
+		await sendControl("clear-statistics", "Send CLEAR STATISTICS command?");
+	});
+}
+
+async function refreshUartStatus() {
+	try {
+		const response = await fetch(`${API_BASE}/api/uart-control`);
+		const status = await response.json();
+		renderUartStatus(status);
+	} catch (error) {
+		renderUartStatus(null);
+	}
+}
+
 async function refreshSettings() {
 	try {
 		const response = await fetch(`${API_BASE}/api/cell-settings`);
@@ -631,11 +859,16 @@ async function refreshData() {
 		renderRpiStatus(null);
 	}
 
+	await refreshUartStatus();
+	await refreshRuntimeConfig();
 	await refreshSettings();
 }
 
 initTabs();
 wireSettingsForm();
+wireRuntimeConfigForm();
+wireUartControls();
+wireBmsControls();
 wireStatisticsControls();
 refreshHealth();
 refreshData();
