@@ -1,132 +1,321 @@
-# BMS Host Stack (Serwis + GUI + Web UI)
+# BmsManager
 
-Ten projekt uruchamia hostowy stos BMS składający się z:
+Prosta instrukcja uruchomienia projektu na Windows.
 
-- serwisu API w Javie (`BmsApiServer`)
-- nadawcy UART (`BmsUartSender`) - odczytuje dane z TinyBMS i wysyła do API
-- interfejsu JavaFX (`MainGUI`) uruchamianego jako osobna aplikacja
-- osobnego procesu Web UI (statyczny dashboard)
-- opcjonalnego symulatora telemetrii (`BmsTestFeeder`)
+Ten README jest napisany specjalnie krok po kroku, bez zgadywania.
+Jeżeli robisz to pierwszy raz, wykonuj punkty dokładnie po kolei.
 
-## 1. Wymagania
+## Co to jest
 
-### Host Windows
+Projekt składa się z 4 części:
 
-- Java JDK 20+ w PATH (`java`, `javac`)
-- działający MySQL (np. XAMPP lub standardowa instalacja)
-- Maven w PATH (`mvn`) dla GUI
+- backend API w Javie
+- Web UI w przeglądarce
+- GUI JavaFX
+- UART sender, który czyta dane z TinyBMS i wysyła je do backendu
 
-### Host Linux/WSL
+Najważniejsze:
 
-- środowisko Java Runtime (`java`)
-- opcjonalnie JDK (`javac`) do świeżej kompilacji
-- Maven (`mvn`) dla GUI
-- Python 3 do procesu Web UI
+- `run_full_stack.bat` uruchamia backend + Web UI
+- `run_uart_sender.bat` uruchamia odczyt z portu COM
+- GUI uruchamia się osobno
 
-## 2. Konfiguracja bazy danych
+## Czego potrzebujesz
 
-Uruchom jednorazowo (Windows + MySQL z XAMPP):
+Na Windows musisz mieć:
+
+- Java JDK 20 lub nowsze
+- MySQL, najlepiej z XAMPP
+- PowerShell
+
+Dobrze jest też mieć:
+
+- podłączony TinyBMS
+- numer portu COM, pod którym go widzi Windows, np. `COM3` albo `COM5`
+
+## Gdzie uruchamiać komendy
+
+Wszystkie komendy z tego README uruchamiaj w tym folderze:
+
+```powershell
+C:\Users\Piotrek\IdeaProjects\BmsManager
+```
+
+Jeżeli jesteś w PowerShell, uruchamiaj pliki `.bat` tak:
+
+```powershell
+.\nazwa_pliku.bat
+```
+
+Nie tak:
+
+```powershell
+nazwa_pliku.bat
+```
+
+Bo PowerShell wtedy często nie znajdzie pliku z bieżącego katalogu.
+
+## Pierwsze uruchomienie - zrób to raz
+
+### 1. Skopiuj plik konfiguracyjny
+
+```powershell
+Copy-Item ".env.example" ".env"
+```
+
+Jeśli plik `.env` już istnieje, ten krok pomiń.
+
+### 2. Ustaw podstawową konfigurację
+
+Otwórz plik [.env](C:/Users/Piotrek/IdeaProjects/BmsManager/.env) i sprawdź te linie:
+
+```env
+BMS_API_PORT=8090
+WEB_UI_PORT=8088
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_NAME=bms
+DB_USER=root
+DB_PASSWORD=
+SERIAL_PORT=COM5
+SERIAL_BAUD=115200
+BMS_API_INGEST_URL=http://127.0.0.1:8090/api/ingest
+```
+
+Najważniejsze rzeczy:
+
+- `DB_PASSWORD=` zostaw puste, jeśli MySQL root nie ma hasła
+- `SERIAL_PORT=` ustaw na swój prawdziwy port COM
+
+### 3. Uruchom MySQL
+
+Najprościej przez XAMPP:
+
+```powershell
+& "C:\xampp\xampp-control.exe"
+```
+
+W panelu XAMPP kliknij `Start` przy `MySQL`.
+
+### 4. Utwórz bazę danych
+
+Uruchom:
 
 ```powershell
 $sql = Get-Content -Raw "bms_schema.sql"
 & "C:\xampp\mysql\bin\mysql.exe" -u root -e $sql
 ```
 
-Adnotacja: XAMPP MySQL jest traktowany jako rozwiązanie tymczasowe i może zostać zastąpiony standardową instalacją MySQL.
-
-## 3. Szablon konfiguracji
-
-Użyj dołączonego szablonu konfiguracji środowiska:
+Jeśli root ma hasło:
 
 ```powershell
-Copy-Item ".env.example" ".env"
+$sql = Get-Content -Raw "bms_schema.sql"
+& "C:\xampp\mysql\bin\mysql.exe" -u root -p -e $sql
 ```
 
-Skrypty uruchomieniowe automatycznie wczytują `.env`, jeśli plik istnieje.
+### 5. Sprawdź, czy baza istnieje
 
-Kluczowe zmienne:
-
-- `BMS_API_PORT`, `WEB_UI_PORT`
-- `SERIAL_PORT` (domyślnie COM3 dla `BmsUartSender`)
-- `BMS_API_INGEST_URL` (url do ingest dla `BmsUartSender`)
-- `BMS_SIM_COUNT`, `BMS_SIM_INTERVAL_MS`
-- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
-- `BMS_DB_RETENTION_DAYS` (domyślnie 7 dni)
-
-## 4. Tryby serwisu i nadawcy
-
-### Serwis API (Backend)
-
-Windows:
 ```powershell
-.\run_service.bat normal
-.\run_service.bat single
-.\run_service.bat simulate
-.\run_service.bat simulate4
+& "C:\xampp\mysql\bin\mysql.exe" -u root -e "SHOW DATABASES LIKE 'bms';"
 ```
 
-### Nadawca UART (Odczyt z BMS)
+Jeśli wszystko jest OK, zobaczysz `bms`.
 
-Jeśli masz podłączony TinyBMS przez UART:
+## Normalne uruchamianie projektu
+
+### 1. Zatrzymaj stare procesy
+
 ```powershell
-.\run_uart_sender.bat
+.\stop_all.bat
 ```
-Skrypt automatycznie pobierze bibliotekę `jSerialComm`, skompiluje i uruchomi nadawcę.
 
-## 5. Uruchomienie pełnego stosu
-
-### Windows 
+### 2. Uruchom backend i Web UI
 
 ```powershell
 .\run_full_stack.bat normal
 ```
 
-Zatrzymanie wszystkiego:
+Po chwili powinieneś mieć:
+
+- backend: `http://127.0.0.1:8090/api/health`
+- dashboard: `http://127.0.0.1:8088/dashboard.html`
+
+### 3. Sprawdź, czy backend działa
+
+W PowerShell najlepiej użyj:
+
 ```powershell
-.\run_full_stack.bat stop
+curl.exe http://127.0.0.1:8090/api/health
 ```
 
-- API: `http://127.0.0.1:8090/api/health`
-- Web UI: `http://127.0.0.1:8088/dashboard.html`
+Albo:
 
-`run_full_stack` uruchamia API + Web UI. GUI JavaFX oraz `BmsUartSender` uruchamiasz osobno.
+```powershell
+Invoke-WebRequest http://127.0.0.1:8090/api/health -UseBasicParsing
+```
 
-## 6. Architektura (Co działa gdzie)
+Prawidłowy wynik powinien zawierać:
 
-### Strona urządzenia (np. RPi lub PC z adapterem UART)
+```json
+"status":"ok"
+"dbConnected":true
+```
 
-- `BmsUartSender`: Komunikacja UART z TinyBMS (protokół binarny), formatowanie do tekstu i wysyłka `POST` do API.
-- Wysyła też okresowy `HEARTBEAT`, aby system wiedział, że połączenie z BMS jest aktywne nawet przy braku zmian danych.
+Jeśli `dbConnected` jest `false`, to znaczy, że MySQL nie działa albo dane w `.env` są złe.
 
-### Serwer / Host (PC)
+### 4. Otwórz dashboard
 
-- `BmsApiServer`: Odbiera dane (ingest), zapisuje do MySQL, serwuje dane przez REST API.
-- Magazyn danych MySQL (tabela `bms_history`, `bms_events`).
-- Statyczny serwer Web UI (dashboard.html + JS).
-- Desktopowe GUI JavaFX (`MainGUI`).
-- Symulacja (`BmsTestFeeder`) używana zamiast rzeczywistego nadawcy UART.
+W przeglądarce otwórz:
 
-Dashboard zawiera zakładki:
-- `Live`: Dane w czasie rzeczywistym.
-- `RPi Status`: Stan źródeł danych (ingest) i świeżość modułów.
-- `Statistics`: Wykresy historyczne z bazy danych.
+```text
+http://127.0.0.1:8088/dashboard.html
+```
 
-## 7. JavaFX GUI
+## Uruchomienie UART sendera
 
-Kompilacja i uruchomienie:
+UART sender czyta dane z TinyBMS z portu COM i wysyła je do backendu.
+
+### Najprostsza wersja
+
+Jeśli masz poprawny `SERIAL_PORT` w `.env`:
+
+```powershell
+.\run_uart_sender.bat
+```
+
+### Uruchomienie z podaniem portu przy starcie
+
+Jeśli chcesz wskazać port ręcznie:
+
+```powershell
+.\run_uart_sender.bat COM3
+```
+
+albo:
+
+```powershell
+.\run_uart_sender.bat COM5
+```
+
+albo:
+
+```powershell
+.\run_uart_sender.bat --port=COM5
+```
+
+### Co oznaczają komunikaty
+
+Jeśli zobaczysz:
+
+```text
+[BmsUartSender] Port opened successfully
+```
+
+to znaczy, że port COM został otwarty poprawnie.
+
+Jeśli zobaczysz:
+
+```text
+[BmsUartSender] Failed to open port COM5
+```
+
+to zwykle znaczy jedno z tych:
+
+- zły numer portu
+- port jest zajęty przez inny program
+- urządzenie nie jest poprawnie podłączone
+
+Wtedy:
+
+- sprawdź numer portu w Menedżerze urządzeń
+- zamknij inne programy używające COM
+- spróbuj jeszcze raz z innym portem, np. `COM3` lub `COM5`
+
+## GUI JavaFX
+
+GUI uruchomisz osobno:
+
 ```powershell
 .\build_and_run_gui.bat
 ```
 
-Budowanie paczki JAR:
-```powershell
-.\build_and_run_gui.bat --package
+## Najczęstsze problemy
+
+### PowerShell nie znajduje pliku `.bat`
+
+Jeśli widzisz coś w stylu:
+
+```text
+is not recognized
 ```
 
-## 8. Uwagi
+to uruchamiaj tak:
 
-- Tryb `single` wymusza tylko moduł 1.
-- Tryb `simulate` / `simulate4` uruchamia `BmsTestFeeder`.
-- Retencja danych jest automatyczna (czyści stare rekordy z bazy).
-- `Main.java` w tym projekcie jest uproszczonym entrypointem uruchamiającym `BmsUartSender`.
+```powershell
+.\run_full_stack.bat normal
+```
 
+zamiast:
+
+```powershell
+run_full_stack.bat normal
+```
+
+### `dbConnected:false`
+
+To znaczy:
+
+- MySQL nie działa
+- baza `bms` nie została utworzona
+- login/hasło w `.env` są złe
+
+### `Connection refused`
+
+To znaczy, że backend nie działa na `8090`.
+
+Sprawdź:
+
+```powershell
+.\stop_all.bat
+.\run_full_stack.bat normal
+curl.exe http://127.0.0.1:8090/api/health
+```
+
+### `Failed to open port COMx`
+
+To problem z portem szeregowym, nie z bazą i nie z Web UI.
+
+Sprawdź:
+
+- czy kabel jest podłączony
+- jaki jest prawdziwy numer COM
+- czy inny program nie trzyma portu
+
+### Ostrzeżenie o `restricted method` i `jSerialComm`
+
+Takie warningi:
+
+```text
+WARNING: java.lang.System::loadLibrary ...
+```
+
+nie oznaczają jeszcze awarii programu.
+To ostrzeżenie z nowszej Javy. Sam program może mimo tego działać normalnie.
+
+## Kolejność uruchamiania, jeśli chcesz mieć wszystko
+
+1. Uruchom MySQL w XAMPP.
+2. Uruchom `.\stop_all.bat`.
+3. Uruchom `.\run_full_stack.bat normal`.
+4. Sprawdź `http://127.0.0.1:8090/api/health`.
+5. Otwórz `http://127.0.0.1:8088/dashboard.html`.
+6. Uruchom `.\run_uart_sender.bat COM3` albo inny właściwy port.
+7. Sprawdź, czy dane pojawiają się w dashboardzie.
+
+## Przydatne pliki
+
+- konfiguracja: [.env](C:/Users/Piotrek/IdeaProjects/BmsManager/.env)
+- schemat bazy: [bms_schema.sql](C:/Users/Piotrek/IdeaProjects/BmsManager/bms_schema.sql)
+- start całego stacka: [run_full_stack.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/run_full_stack.bat)
+- start UART: [run_uart_sender.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/run_uart_sender.bat)
+- zatrzymanie procesów: [stop_all.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/stop_all.bat)

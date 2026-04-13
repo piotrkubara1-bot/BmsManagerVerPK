@@ -38,8 +38,8 @@ public class BmsUartSender {
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
-    public BmsUartSender() {
-        this.portName = env("SERIAL_PORT", "COM5");
+    public BmsUartSender(String[] args) {
+        this.portName = resolvePortName(args);
         this.baudRate = Integer.parseInt(env("SERIAL_BAUD", "115200"));
         this.moduleId = Integer.parseInt(env("DEFAULT_MODULE_ID", "1"));
         this.ingestUrl = env("BMS_API_INGEST_URL", "http://127.0.0.1:8090/api/ingest");
@@ -359,8 +359,39 @@ public class BmsUartSender {
         return value == null || value.trim().isEmpty() ? fallback : value.trim();
     }
 
+    private String resolvePortName(String[] args) {
+        String fallback = env("SERIAL_PORT", "COM5");
+        if (args == null || args.length == 0) {
+            return fallback;
+        }
+
+        for (String arg : args) {
+            if (arg == null) {
+                continue;
+            }
+
+            String trimmed = arg.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+
+            if (trimmed.startsWith("--port=")) {
+                String value = trimmed.substring("--port=".length()).trim();
+                if (!value.isEmpty()) {
+                    return value;
+                }
+            }
+
+            if (!trimmed.startsWith("--")) {
+                return trimmed;
+            }
+        }
+
+        return fallback;
+    }
+
     public static void main(String[] args) {
-        new BmsUartSender().start();
+        new BmsUartSender(args).start();
     }
 
     private static class TinyBmsSnapshot {
