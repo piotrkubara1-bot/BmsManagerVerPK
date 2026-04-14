@@ -340,7 +340,7 @@ http://TWOJ_ADRES_IP:8090/api/health
 Przykład:
 
 ```text
-http://192.168.31.70:8090/api/health
+http://192.168.41.8:8090/api/health
 ```
 
 Jeśli telefon otwiera ten adres, to aplikacja mobilna też powinna działać.
