@@ -307,7 +307,7 @@ Najczęściej dobry adres to taki, który:
 
 - jest w sekcji `Wi-Fi`,
 - ma obok `Default Gateway`,
-- wygląda na przykład jak `192.168.1.100` albo `192.168.31.70`
+- wygląda na przykład jak `192.168.1.100` albo `192.168.41.8`
 
 W aplikacji mobilnej wpisujesz wtedy:
 
