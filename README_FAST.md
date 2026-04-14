@@ -106,7 +106,7 @@ To właśnie ten adres wpisujesz do telefonu.
 Potem w telefonie wpisz adres backendu, na przykład:
 
 ```text
-http://192.168.31.70:8090
+http://192.168.41.8:8090
 ```
 
 Nie wpisuj:
