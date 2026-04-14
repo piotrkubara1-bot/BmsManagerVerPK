@@ -28,10 +28,12 @@ Na komputerze musisz mieć:
 
 ## 2. W jakim folderze uruchamiać komendy
 
-Wszystkie komendy uruchamiaj tutaj:
+Wszystkie komendy uruchamiaj w folderze projektu.
+
+Przykład:
 
 ```powershell
-C:\Users\Piotrek\IdeaProjects\BmsManager
+C:\sciezka\do\BmsManager
 ```
 
 W PowerShell przed plikiem `.bat` zawsze pisz `.\`
@@ -62,7 +64,7 @@ Jeśli plik `.env` już istnieje, nic nie rób.
 
 ### Krok 2. Otwórz `.env`
 
-Otwórz plik [C:\Users\Piotrek\IdeaProjects\BmsManager\.env](C:/Users/Piotrek/IdeaProjects/BmsManager/.env)
+Otwórz plik `.env` w folderze projektu.
 
 Sprawdź, czy masz tam przynajmniej takie wartości:
 
@@ -248,7 +250,7 @@ Ważne:
 
 Aplikacja mobilna jest w osobnym folderze:
 
-[C:\Users\Piotrek\IdeaProjects\BmsManager\mobile-viewer-android](C:/Users/Piotrek/IdeaProjects/BmsManager/mobile-viewer-android)
+`mobile-viewer-android`
 
 To jest osobny projekt do Android Studio.
 
@@ -353,10 +355,10 @@ run_server_stack.bat
 
 ## 15. Najważniejsze pliki
 
-- serwer: [C:\Users\Piotrek\IdeaProjects\BmsManager\run_server_stack.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/run_server_stack.bat)
-- backend + Web GUI: [C:\Users\Piotrek\IdeaProjects\BmsManager\run_full_stack.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/run_full_stack.bat)
-- UART sender: [C:\Users\Piotrek\IdeaProjects\BmsManager\run_uart_sender.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/run_uart_sender.bat)
-- desktop viewer: [C:\Users\Piotrek\IdeaProjects\BmsManager\run_desktop_web_gui.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/run_desktop_web_gui.bat)
-- zatrzymanie: [C:\Users\Piotrek\IdeaProjects\BmsManager\stop_all.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/stop_all.bat)
-- konfiguracja: [C:\Users\Piotrek\IdeaProjects\BmsManager\.env.example](C:/Users/Piotrek/IdeaProjects/BmsManager/.env.example)
-- aplikacja mobilna: [C:\Users\Piotrek\IdeaProjects\BmsManager\mobile-viewer-android](C:/Users/Piotrek/IdeaProjects/BmsManager/mobile-viewer-android)
+- serwer: `run_server_stack.bat`
+- backend + Web GUI: `run_full_stack.bat`
+- UART sender: `run_uart_sender.bat`
+- desktop viewer: `run_desktop_web_gui.bat`
+- zatrzymanie: `stop_all.bat`
+- konfiguracja: `.env.example`
+- aplikacja mobilna: `mobile-viewer-android`

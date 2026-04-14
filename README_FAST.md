@@ -4,12 +4,12 @@ To jest bardzo krótka instrukcja.
 
 Jeśli chcesz pełną instrukcję, otwórz:
 
-[C:\Users\Piotrek\IdeaProjects\BmsManager\README.md](C:/Users/Piotrek/IdeaProjects/BmsManager/README.md)
+`README.md`
 
 ## 1. Wejdź do folderu projektu
 
 ```powershell
-C:\Users\Piotrek\IdeaProjects\BmsManager
+C:\sciezka\do\BmsManager
 ```
 
 ## 2. Jeśli nie masz `.env`, skopiuj go
@@ -85,7 +85,7 @@ Potem uruchom viewer:
 
 Otwórz ten folder w Android Studio:
 
-[C:\Users\Piotrek\IdeaProjects\BmsManager\mobile-viewer-android](C:/Users/Piotrek/IdeaProjects/BmsManager/mobile-viewer-android)
+`mobile-viewer-android`
 
 Telefon i komputer muszą być w tym samym Wi-Fi.
 
