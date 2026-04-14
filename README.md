@@ -1,60 +1,40 @@
 # BmsManager
 
-Instrukcja dla Windows, krok po kroku.
+To jest bardzo prosta instrukcja uruchomienia projektu na Windows.
+
+Ten projekt ma kilka części:
+
+- baza danych MySQL,
+- backend API,
+- Web GUI w przeglądarce,
+- desktop viewer w JavaFX,
+- osobną aplikację mobilną Android.
 
 Najważniejsze:
 
-- cały serwerowy stack uruchamiasz jedną komendą:
-  `.\run_server_stack.bat`
-- to stawia:
-  - MySQL z XAMPP
-  - schemat bazy z `bms_schema.sql`
-  - backend API
-  - Web UI
-- aplikację mobilną uruchamiasz osobno z folderu:
-  [mobile-viewer-android](C:/Users/Piotrek/IdeaProjects/BmsManager/mobile-viewer-android)
-- aplikację desktopową JavaFX uruchamiasz osobno, tylko jeśli chcesz
+- serwer uruchamiasz jedną komendą: `.\run_server_stack.bat`
+- Web GUI działa bez podłączonego BMS
+- jeśli nie masz sprzętu, możesz użyć trybu `SIMULATED`
+- aplikacja mobilna jest osobnym projektem i uruchamia się osobno
 
-## Co działa bez podłączonego BMS
+## 1. Co musisz mieć zainstalowane
 
-Tak, możesz uruchomić:
+Na komputerze musisz mieć:
 
-- MySQL
-- backend
-- Web UI
-- bazę danych
-- dashboard
-
-nawet wtedy, gdy fizyczny TinyBMS nie jest podłączony.
-
-W takim przypadku po prostu:
-
-- nie będzie prawdziwej telemetrii,
-- albo możesz użyć trybu `SIMULATED`.
-
-## Wymagania
-
-Musisz mieć:
-
-- Java JDK 20+
-- XAMPP w `C:\xampp`
+- Java JDK
+- XAMPP w folderze `C:\xampp`
 - PowerShell
+- opcjonalnie Android Studio, jeśli chcesz uruchomić aplikację mobilną
 
-Przydatne pliki:
+## 2. W jakim folderze uruchamiać komendy
 
-- konfiguracja: [.env](C:/Users/Piotrek/IdeaProjects/BmsManager/.env)
-- szybka instrukcja: [README_FAST.md](C:/Users/Piotrek/IdeaProjects/BmsManager/README_FAST.md)
-- mobilny viewer: [mobile-viewer-android](C:/Users/Piotrek/IdeaProjects/BmsManager/mobile-viewer-android)
-
-## Gdzie uruchamiać komendy
-
-W tym folderze:
+Wszystkie komendy uruchamiaj tutaj:
 
 ```powershell
 C:\Users\Piotrek\IdeaProjects\BmsManager
 ```
 
-W PowerShell pliki `.bat` uruchamiaj z `.\`
+W PowerShell przed plikiem `.bat` zawsze pisz `.\`
 
 Przykład:
 
@@ -62,19 +42,29 @@ Przykład:
 .\run_server_stack.bat
 ```
 
-## Pierwsze przygotowanie
+Nie tak:
 
-### 1. Skopiuj konfigurację
+```powershell
+run_server_stack.bat
+```
+
+## 3. Pierwsze przygotowanie
+
+### Krok 1. Skopiuj plik konfiguracyjny
+
+Jeśli nie masz jeszcze pliku `.env`, skopiuj go z przykładu:
 
 ```powershell
 Copy-Item ".env.example" ".env"
 ```
 
-Jeśli `.env` już istnieje, pomiń.
+Jeśli plik `.env` już istnieje, nic nie rób.
 
-### 2. Sprawdź `.env`
+### Krok 2. Otwórz `.env`
 
-Otwórz [.env](C:/Users/Piotrek/IdeaProjects/BmsManager/.env) i zobacz przynajmniej te pola:
+Otwórz plik [C:\Users\Piotrek\IdeaProjects\BmsManager\.env](C:/Users/Piotrek/IdeaProjects/BmsManager/.env)
+
+Sprawdź, czy masz tam przynajmniej takie wartości:
 
 ```env
 BMS_API_PORT=8090
@@ -89,29 +79,57 @@ SERIAL_BAUD=115200
 BMS_API_INGEST_URL=http://127.0.0.1:8090/api/ingest
 ```
 
-Jeśli nie masz podłączonego BMS i chcesz symulację, ustaw:
+Jeśli nie masz podłączonego BMS i chcesz tylko testować program, ustaw:
 
 ```env
 SERIAL_PORT=SIMULATED
 ```
 
-## Jedna komenda do uruchomienia serwera
+## 4. Jak uruchomić cały serwer
 
-Najprostsza komenda:
+Najprościej tak:
 
 ```powershell
 .\run_server_stack.bat
 ```
 
-Ten skrypt:
+Ten skrypt robi po kolei:
 
 1. uruchamia MySQL z XAMPP,
-2. czeka aż MySQL zacznie słuchać,
-3. importuje `bms_schema.sql`,
-4. uruchamia backend,
-5. uruchamia Web UI.
+2. czeka aż MySQL będzie gotowy,
+3. importuje plik `bms_schema.sql`,
+4. uruchamia backend API,
+5. uruchamia Web GUI.
 
-### Zatrzymanie
+Nie musisz osobno uruchamiać bazy, backendu i Web GUI.
+
+## 5. Jak sprawdzić, czy serwer działa
+
+Po uruchomieniu wejdź na:
+
+- [http://127.0.0.1:8090/api/health](http://127.0.0.1:8090/api/health)
+- [http://127.0.0.1:8088/dashboard.html](http://127.0.0.1:8088/dashboard.html)
+
+Możesz też sprawdzić to komendą:
+
+```powershell
+curl.exe http://127.0.0.1:8090/api/health
+```
+
+Poprawny wynik powinien wyglądać mniej więcej tak:
+
+```json
+{"status":"ok","dbConnected":true}
+```
+
+Najważniejsze są dwie rzeczy:
+
+- `"status":"ok"`
+- `"dbConnected":true`
+
+## 6. Jak zatrzymać serwer
+
+Zatrzymanie:
 
 ```powershell
 .\run_server_stack.bat stop
@@ -123,224 +141,186 @@ albo:
 .\stop_all.bat
 ```
 
-## Adresy po uruchomieniu
+## 7. Jak używać Web GUI
 
-- health:
-  [http://127.0.0.1:8090/api/health](http://127.0.0.1:8090/api/health)
-- dashboard:
-  [http://127.0.0.1:8088/dashboard.html](http://127.0.0.1:8088/dashboard.html)
-
-## Jak sprawdzić, czy wszystko działa
-
-Uruchom:
-
-```powershell
-curl.exe http://127.0.0.1:8090/api/health
-```
-
-Ma być coś w tym stylu:
-
-```json
-{"status":"ok","dbConnected":true,...}
-```
-
-Najważniejsze:
-
-- `"status":"ok"`
-- `"dbConnected":true`
-
-## Web UI
-
-Otwórz:
+Web GUI otwierasz tutaj:
 
 [http://127.0.0.1:8088/dashboard.html](http://127.0.0.1:8088/dashboard.html)
 
-W zakładce `Cell Settings` masz teraz:
+W Web GUI możesz:
 
-- zapis portu COM do `.env`
-- opcję `SIMULATED`
-- przycisk `Start UART`
-- przycisk `Stop UART`
-- logi procesu UART
+- oglądać dane,
+- wybrać port COM,
+- zapisać port do konfiguracji,
+- uruchomić i zatrzymać UART,
+- użyć trybu `SIMULATED`,
+- wysłać komendy `Reset BMS`, `Clear Events`, `Clear Statistics`
 
-### Dopuszczalne wartości portu
+## 8. Co zrobić, jeśli nie masz podłączonego BMS
 
-- `COM3`
-- `COM5`
-- inny prawdziwy port typu `COM7`
-- `SIMULATED`
+Jeśli nie masz sprzętu, nadal możesz uruchomić cały projekt.
 
-## Tryb SIMULATED
+Zrób tak:
 
-Jeśli chcesz testować bez podłączonego BMS:
-
-1. wejdź do Web UI
-2. w `Saved COM Port` wpisz:
-
-```text
-SIMULATED
-```
-
-3. kliknij `Save COM Port`
-4. kliknij `Start UART`
-
-Wtedy sender nie otwiera prawdziwego portu COM, tylko generuje testową telemetrię i wysyła ją do backendu.
-
-To jest najprostszy tryb do sprawdzania dashboardu i API bez sprzętu.
-
-## Ręczne uruchomienie UART sendera
-
-Jeśli chcesz go odpalić z terminala:
-
-```powershell
-.\run_uart_sender.bat
-```
-
-albo z konkretnym portem:
-
-```powershell
-.\run_uart_sender.bat COM3
-```
-
-albo:
-
-```powershell
-.\run_uart_sender.bat SIMULATED
-```
-
-## Aplikacja mobilna Android
-
-Dodałem osobny projekt Android Studio:
-
-[mobile-viewer-android](C:/Users/Piotrek/IdeaProjects/BmsManager/mobile-viewer-android)
-
-To jest osobna aplikacja do telefonu, tylko do podglądu danych.
-
-Ona:
-
-- łączy się z backendem przez HTTP,
-- pokazuje `health`,
-- pokazuje najnowsze dane z `/api/latest`,
-- nie steruje UART,
-- nie zapisuje ustawień TinyBMS.
-
-### Jak ją otworzyć
-
-1. Otwórz Android Studio.
-2. Wybierz `Open`.
-3. Wskaż folder:
-
-[mobile-viewer-android](C:/Users/Piotrek/IdeaProjects/BmsManager/mobile-viewer-android)
-
-4. Poczekaj na sync Gradle.
-5. Uruchom apkę na emulatorze albo telefonie.
-
-### Ważne
-
-Apka mobilna jest teraz napisana w Java, nie w Kotlinie.
-
-W telefonie wpisujesz adres backendu, np.:
-
-```text
-http://192.168.1.100:8090
-```
-
-Nie `127.0.0.1`, bo telefon i komputer to nie to samo urządzenie.
-
-### Jak połączyć telefon z PC
-
-Telefon i komputer muszą być w tej samej sieci lokalnej, najczęściej w tym samym Wi-Fi.
-
-Na komputerze sprawdź adres IP:
-
-```powershell
-ipconfig
-```
-
-Szukaj adresu IPv4, np.:
-
-```text
-192.168.1.100
-```
-
-Potem:
-
-1. uruchom serwer na PC:
+1. uruchom serwer:
 
 ```powershell
 .\run_server_stack.bat
 ```
 
-2. sprawdź lokalnie na PC:
+2. otwórz Web GUI:
+
+[http://127.0.0.1:8088/dashboard.html](http://127.0.0.1:8088/dashboard.html)
+
+3. przejdź do zakładki `Cell Settings`
+4. wybierz port `SIMULATED`
+5. kliknij `Save COM Port`
+6. kliknij `Start UART`
+
+Wtedy program nie używa prawdziwego portu COM.
+Zamiast tego generuje sztuczne dane testowe.
+
+To jest najlepszy sposób, żeby sprawdzić działanie programu bez urządzenia.
+
+## 9. Co zrobić, jeśli masz prawdziwy BMS
+
+Jeśli masz prawdziwy sprzęt, zrób tak:
+
+1. podłącz BMS do komputera,
+2. sprawdź w Menedżerze urządzeń, jaki ma numer portu, na przykład `COM3` albo `COM5`,
+3. uruchom serwer:
 
 ```powershell
-curl.exe http://127.0.0.1:8090/api/health
+.\run_server_stack.bat
 ```
 
-3. wpisz w telefonie adres:
+4. otwórz Web GUI,
+5. przejdź do zakładki `Cell Settings`,
+6. wybierz właściwy port COM,
+7. kliknij `Save COM Port`,
+8. kliknij `Start UART`
 
-```text
-http://TWOJ_IP_Z_PC:8090
-```
+## 10. Jak ręcznie uruchomić UART sender
 
-na przykład:
+Możesz też uruchomić sender ręcznie z terminala.
 
-```text
-http://192.168.1.100:8090
-```
-
-### Jeśli telefon nie łączy się z PC
-
-Sprawdź:
-
-- czy telefon i PC są w tym samym Wi-Fi
-- czy backend działa
-- czy firewall Windows nie blokuje portu `8090`
-
-Jeśli trzeba, dodaj regułę firewalla dla portu `8090`.
-
-Szybki test z innego urządzenia w sieci:
-
-```text
-http://TWOJ_IP_Z_PC:8090/api/health
-```
-
-Jeśli to nie działa poza PC, to problem jest sieciowy, nie w aplikacji Android.
-
-## Desktop GUI
-
-Desktopową apkę JavaFX uruchamiasz osobno:
+Bez podawania portu:
 
 ```powershell
-.\build_and_run_gui.bat
+.\run_uart_sender.bat
 ```
 
-Nie jest potrzebna do działania backendu i Web UI.
+Z konkretnym portem:
 
-## Najczęstsze problemy
+```powershell
+.\run_uart_sender.bat COM3
+```
 
-### `dbConnected:false`
+Albo w trybie symulacji:
 
-To znaczy:
+```powershell
+.\run_uart_sender.bat SIMULATED
+```
 
-- MySQL nie wstał,
-- dane bazy w `.env` są złe,
-- backend wystartował zanim baza była gotowa.
+## 11. Desktop viewer
 
-Najprościej:
+Desktop viewer to osobny program w JavaFX.
+Wygląda jak Web GUI, ale działa jako osobne okno na komputerze.
+
+Najpierw uruchom serwer:
+
+```powershell
+.\run_server_stack.bat
+```
+
+Potem uruchom desktop viewer:
+
+```powershell
+.\run_desktop_web_gui.bat
+```
+
+Ważne:
+
+- najpierw serwer,
+- dopiero potem desktop viewer
+
+## 12. Aplikacja mobilna Android
+
+Aplikacja mobilna jest w osobnym folderze:
+
+[C:\Users\Piotrek\IdeaProjects\BmsManager\mobile-viewer-android](C:/Users/Piotrek/IdeaProjects/BmsManager/mobile-viewer-android)
+
+To jest osobny projekt do Android Studio.
+
+### Jak uruchomić aplikację mobilną
+
+1. uruchom Android Studio,
+2. kliknij `Open`,
+3. wskaż folder `mobile-viewer-android`,
+4. poczekaj aż Android Studio zrobi sync projektu,
+5. uruchom aplikację na telefonie albo emulatorze
+
+## 13. Jak połączyć telefon z komputerem
+
+Telefon i komputer muszą być w tej samej sieci Wi-Fi.
+
+Najpierw na komputerze uruchom serwer:
+
+```powershell
+.\run_server_stack.bat
+```
+
+Potem sprawdź adres IP komputera:
+
+```powershell
+ipconfig
+```
+
+Znajdź adres IPv4 karty Wi-Fi.
+Przykład:
+
+```text
+192.168.31.70
+```
+
+W aplikacji mobilnej wpisujesz wtedy:
+
+```text
+http://192.168.31.70:8090
+```
+
+Nie wpisuj:
+
+```text
+http://127.0.0.1:8090
+```
+
+Bo `127.0.0.1` na telefonie oznacza telefon, a nie komputer.
+
+## 14. Najczęstsze problemy
+
+### Problem 1. `dbConnected:false`
+
+To zwykle znaczy:
+
+- MySQL nie działa,
+- backend uruchomił się za wcześnie,
+- dane bazy w `.env` są złe
+
+Najprostsza naprawa:
 
 ```powershell
 .\stop_all.bat
 .\run_server_stack.bat
 ```
 
-### `Failed to open port COMx`
+### Problem 2. `Failed to open port COMx`
 
-To znaczy:
+To zwykle znaczy:
 
-- zły port COM,
-- port zajęty przez inny program,
-- urządzenie niepodłączone.
+- wybrałeś zły port,
+- port jest zajęty przez inny program,
+- urządzenie nie jest podłączone
 
 Jeśli nie masz sprzętu, użyj:
 
@@ -348,34 +328,35 @@ Jeśli nie masz sprzętu, użyj:
 SIMULATED
 ```
 
-### Web UI działa, ale nie ma danych
+### Problem 3. Web GUI działa, ale nie ma danych
 
-To znaczy zwykle:
+To zwykle znaczy:
 
-- UART sender nie działa,
+- UART nie został uruchomiony,
 - nie kliknąłeś `Start UART`,
-- port jest zły,
-- albo nie włączyłeś `SIMULATED`.
+- wybrany port COM jest zły,
+- nie uruchomiłeś trybu `SIMULATED`
 
-### PowerShell nie widzi `.bat`
+### Problem 4. PowerShell nie uruchamia `.bat`
 
-Używaj:
+Pisz tak:
 
 ```powershell
 .\run_server_stack.bat
 ```
 
-nie:
+Nie tak:
 
 ```powershell
 run_server_stack.bat
 ```
 
-## Najważniejsze pliki
+## 15. Najważniejsze pliki
 
-- start wszystkiego: [run_server_stack.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/run_server_stack.bat)
-- zwykły backend + Web UI: [run_full_stack.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/run_full_stack.bat)
-- UART sender: [run_uart_sender.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/run_uart_sender.bat)
-- zatrzymanie: [stop_all.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/stop_all.bat)
-- backend: [BmsApiServer.java](C:/Users/Piotrek/IdeaProjects/BmsManager/src/main/java/BmsApiServer.java)
-- sender UART: [BmsUartSender.java](C:/Users/Piotrek/IdeaProjects/BmsManager/src/main/java/BmsUartSender.java)
+- serwer: [C:\Users\Piotrek\IdeaProjects\BmsManager\run_server_stack.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/run_server_stack.bat)
+- backend + Web GUI: [C:\Users\Piotrek\IdeaProjects\BmsManager\run_full_stack.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/run_full_stack.bat)
+- UART sender: [C:\Users\Piotrek\IdeaProjects\BmsManager\run_uart_sender.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/run_uart_sender.bat)
+- desktop viewer: [C:\Users\Piotrek\IdeaProjects\BmsManager\run_desktop_web_gui.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/run_desktop_web_gui.bat)
+- zatrzymanie: [C:\Users\Piotrek\IdeaProjects\BmsManager\stop_all.bat](C:/Users/Piotrek/IdeaProjects/BmsManager/stop_all.bat)
+- konfiguracja: [C:\Users\Piotrek\IdeaProjects\BmsManager\.env.example](C:/Users/Piotrek/IdeaProjects/BmsManager/.env.example)
+- aplikacja mobilna: [C:\Users\Piotrek\IdeaProjects\BmsManager\mobile-viewer-android](C:/Users/Piotrek/IdeaProjects/BmsManager/mobile-viewer-android)
