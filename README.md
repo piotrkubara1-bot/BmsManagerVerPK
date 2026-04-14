@@ -62,6 +62,13 @@ Copy-Item ".env.example" ".env"
 
 Jeśli plik `.env` już istnieje, nic nie rób.
 
+Ważne:
+
+- pliku `.env` nie ma na GitHubie celowo,
+- ten plik zawiera lokalną konfigurację komputera,
+- dlatego w repo jest tylko `.env.example`,
+- Ty masz skopiować `.env.example` do `.env` u siebie na swoim komputerze
+
 ### Krok 2. Otwórz `.env`
 
 Otwórz plik `.env` w folderze projektu.
@@ -278,12 +285,29 @@ Potem sprawdź adres IP komputera:
 ipconfig
 ```
 
-Znajdź adres IPv4 karty Wi-Fi.
-Przykład:
+Teraz zrób to dokładnie tak:
+
+1. znajdź sekcję `Wireless LAN adapter Wi-Fi`
+2. w tej sekcji znajdź linię `IPv4 Address`
+3. skopiuj tylko ten adres
+
+Przykład poprawnego adresu:
 
 ```text
 192.168.31.70
 ```
+
+Nie wybieraj takich adresów:
+
+- `127.0.0.1`
+- `169.254.x.x`
+- adresów z kart, które nie są Twoim prawdziwym Wi-Fi
+
+Najczęściej dobry adres to taki, który:
+
+- jest w sekcji `Wi-Fi`,
+- ma obok `Default Gateway`,
+- wygląda na przykład jak `192.168.1.100` albo `192.168.31.70`
 
 W aplikacji mobilnej wpisujesz wtedy:
 
@@ -298,6 +322,34 @@ http://127.0.0.1:8090
 ```
 
 Bo `127.0.0.1` na telefonie oznacza telefon, a nie komputer.
+
+### Szybki test, czy adres IP jest dobry
+
+Po uruchomieniu serwera sprawdź na komputerze:
+
+```powershell
+curl.exe http://127.0.0.1:8090/api/health
+```
+
+Jeśli działa, spróbuj na telefonie w przeglądarce wpisać:
+
+```text
+http://TWOJ_ADRES_IP:8090/api/health
+```
+
+Przykład:
+
+```text
+http://192.168.31.70:8090/api/health
+```
+
+Jeśli telefon otwiera ten adres, to aplikacja mobilna też powinna działać.
+
+Jeśli telefon nie otwiera tego adresu, to problem jest zwykle tutaj:
+
+- telefon nie jest w tym samym Wi-Fi,
+- backend nie działa,
+- firewall Windows blokuje połączenie
 
 ## 14. Najczęstsze problemy
 

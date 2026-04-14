@@ -18,6 +18,10 @@ C:\sciezka\do\BmsManager
 Copy-Item ".env.example" ".env"
 ```
 
+Pliku `.env` nie ma na GitHubie celowo.
+Na GitHubie jest tylko `.env.example`.
+Ty masz zrobić własny `.env` lokalnie u siebie.
+
 ## 3. Uruchom cały serwer jedną komendą
 
 ```powershell
@@ -95,6 +99,10 @@ Na komputerze sprawdź IP:
 ipconfig
 ```
 
+Szukaj sekcji `Wireless LAN adapter Wi-Fi`.
+W niej znajdź linię `IPv4 Address`.
+To właśnie ten adres wpisujesz do telefonu.
+
 Potem w telefonie wpisz adres backendu, na przykład:
 
 ```text
@@ -105,6 +113,12 @@ Nie wpisuj:
 
 ```text
 http://127.0.0.1:8090
+```
+
+Jeśli nie działa, sprawdź w przeglądarce telefonu:
+
+```text
+http://TWOJ_IP:8090/api/health
 ```
 
 ## 10. Jak zatrzymać wszystko
