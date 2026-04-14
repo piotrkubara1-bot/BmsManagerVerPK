@@ -3,6 +3,8 @@ bin/
 target/
 out/
 build/
+mobile-viewer-android/.gradle/
+mobile-viewer-android/**/build/
 
 # Temporary compile source lists
 .java_sources.tmp
@@ -15,6 +17,7 @@ build/
 # Environment files
 .env
 *.env.local
+mobile-viewer-android/local.properties
 
 # Local tool/download caches
 .tools/
@@ -31,6 +34,7 @@ RPI/.venv/
 # IDE/editor settings
 .vscode/
 .idea/
+*.iml
 
 # OS files
 .DS_Store
